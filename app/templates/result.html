@@ -38,7 +38,7 @@
       <div id="know_more" class="container mx-auto p-4 text-center">
         <h6 class="d-inline-block">Do you want to know more?</h6>
         <div class=" d-inline-block">
-          <a href="{{url_for('redirectToGoogle')}}" target="_blank" class="custom-button mx-2">Yes</a>
+          <a href="{{url_for('redirectToGoogle', uuid=result_uuid)}}" target="_blank" class="custom-button mx-2">Yes</a>
           <a href="#" onclick="hide_know_more();" class="custom-button">No</a>
         </div>
       </div>
