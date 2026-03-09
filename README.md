@@ -1,54 +1,26 @@
 # [Celestial-bodies-detection](https://celestial-bodies-detection.herokuapp.com/)
 
 Visit [Site](https://celestial-bodies-detection.herokuapp.com/) to use the model.
-## Setup
+## Setup & Run
 
-#### Tensorflow
-    
-Create a virtual environment (recommended)
+> **Prerequisites:** Python 3 must be installed. That's it.
 
-Python virtual environments are used to isolate package installation from the system.
+To set up the environment and start the app, just run this single command from the project root:
 
-Create a new virtual environment by choosing a Python interpreter and making a ./venv directory to hold it:
+```bash
+bash setup_and_run.sh
+```
 
-`virtualenv --system-site-packages -p python3 ./venv`
+This will automatically:
+1. Create a Python virtual environment (only on first run)
+2. Install all dependencies
+3. Start the Flask app at **http://127.0.0.1:5000**
 
-Activate the virtual environment using a shell-specific command:
-
-`source ./venv/bin/activate  # sh, bash, ksh, or zsh`
-
-If using conda, you can run
-    `conda create -n tensorflow python=3.7`
-    `source activate tensorflow`
-
-#### Install Requirements
-Move to the image_training directory: `cd /hub/examples/image_retraining`
-
-`pip install -r requirements.txt`
-
-OR
-
-Install Tensorflow
-
-`pip install tensorflow==1.14`  
-
-Install wikipedia
-
-`pip install wikipedia` 
-
-Install PyYAML
-
-`pip install PyYAML`
- 
-#### Inception
-
-Downloaded automatically while training
+Press `Ctrl+C` to stop the server.
 
 ## Using Webapp
-Simple visit [site](https://celestial-bodies-detection.herokuapp.com/) or local deploy webapp with the help of instructions mentioned below:
+Simple visit [site](https://celestial-bodies-detection.herokuapp.com/) or run locally using the command above.
 
-#### Run
-`python run.py`
 #### Details
 * The webapp is made using Flask, the `static` files (css, js, img), `templates` and `views.py` are in the `/app/` directory.
 * There are four endpoints:
