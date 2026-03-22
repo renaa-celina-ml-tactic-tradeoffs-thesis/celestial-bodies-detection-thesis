@@ -73,6 +73,7 @@ import re
 import struct
 import sys
 import tarfile
+import time
 
 import numpy as np
 from six.moves import urllib
@@ -845,6 +846,9 @@ def main(_):
     sess.run(init)
 
     # Run the training for as many cycles as requested on the command line.
+    # Start timer before training loop
+    start_time = time.perf_counter()
+
     for i in range(FLAGS.how_many_training_steps):
         # Get a batch of input bottleneck values, either calculated fresh every time
         # with distortions applied, or from the cache stored on disk.
@@ -891,6 +895,24 @@ def main(_):
             print('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                   (datetime.now(), i, validation_accuracy * 100,
                    len(validation_bottlenecks)))
+
+    # Stop timer after training loop
+    end_time = time.perf_counter()
+    training_time = end_time - start_time
+    print(f"Training Time: {training_time:.4f} seconds")
+
+    # Save to log file
+    with open("training_time_log.txt", "a") as f:
+        f.write(f"{training_time:.4f}\n")
+
+    # Compute and print average training time from log file
+    with open("training_time_log.txt") as f:
+        times = [float(line.strip()) for line in f if line.strip() and not line.startswith("Average")]
+    if len(times) >= 2:
+        avg = sum(times) / len(times)
+        with open("training_time_log.txt", "a") as f:
+            f.write(f"Average: {avg:.4f}\n")
+        print(f"Average training time so far: {avg:.4f} seconds")
 
     # We've completed all our training, so run a final test evaluation on
     # some new images we haven't used before.
