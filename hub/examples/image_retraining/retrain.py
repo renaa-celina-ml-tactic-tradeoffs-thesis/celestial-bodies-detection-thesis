@@ -77,9 +77,9 @@ import time
 
 import numpy as np
 from six.moves import urllib
-import tensorflow as tf
 
-from tensorflow.python.framework import graph_util
+import tensorflow as tf
+from tensorflow.compat.v1.graph_util import convert_variables_to_constants
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
@@ -905,15 +905,6 @@ def main(_):
     with open("training_time_log.txt", "a") as f:
         f.write(f"{training_time:.4f}\n")
 
-    # Compute and print average training time from log file
-    with open("training_time_log.txt") as f:
-        times = [float(line.strip()) for line in f if line.strip() and not line.startswith("Average")]
-    if len(times) >= 2:
-        avg = sum(times) / len(times)
-        with open("training_time_log.txt", "a") as f:
-            f.write(f"Average: {avg:.4f}\n")
-        print(f"Average training time so far: {avg:.4f} seconds")
-
     # We've completed all our training, so run a final test evaluation on
     # some new images we haven't used before.
     test_bottlenecks, test_ground_truth, test_filenames = (
@@ -936,7 +927,7 @@ def main(_):
                                     list(image_lists.keys())[predictions[i]]))
 
     # Write out the trained graph and labels with the weights stored as constants.
-    output_graph_def = graph_util.convert_variables_to_constants(
+    output_graph_def = convert_variables_to_constants(
         sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
         f.write(output_graph_def.SerializeToString())
