@@ -12,6 +12,10 @@ echo -n "" > "$LOGFILE"
 
 for i in $(seq 1 $RUNS); do
     echo "Run $i/$RUNS"
+    # Remove previous outputs for a clean run
+    rm -f retrained_graph.pb retrained_labels.txt run_output.txt
+    rm -rf bottlenecks
+
     python retrain.py \
         --bottleneck_dir=bottlenecks \
         --how_many_training_steps=500 \
