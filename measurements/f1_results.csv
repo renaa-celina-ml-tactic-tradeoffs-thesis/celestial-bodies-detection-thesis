@@ -1,0 +1,4 @@
+timestamp,run_id,run_number,f1_weighted,precision_weighted,recall_weighted
+2026-03-30T14:27:38,baseline,1,0.8556,0.8957,0.8347
+2026-03-30T14:30:31,baseline,1,0.8516,0.9071,0.8264
+"2026-03-30T14:30:32","baseline_AVG","0","0.8536","0.9014","0.8306"

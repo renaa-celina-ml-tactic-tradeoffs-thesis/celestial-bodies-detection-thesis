@@ -73,12 +73,13 @@ import re
 import struct
 import sys
 import tarfile
+import time
 
 import numpy as np
 from six.moves import urllib
-import tensorflow as tf
 
-from tensorflow.python.framework import graph_util
+import tensorflow as tf
+from tensorflow.compat.v1.graph_util import convert_variables_to_constants
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
@@ -850,6 +851,9 @@ def main(_):
     sess.run(init)
 
     # Run the training for as many cycles as requested on the command line.
+    # Start timer before training loop
+    start_time = time.perf_counter()
+
     for i in range(FLAGS.how_many_training_steps):
         # Get a batch of input bottleneck values, either calculated fresh every time
         # with distortions applied, or from the cache stored on disk.
@@ -897,6 +901,15 @@ def main(_):
                   (datetime.now(), i, validation_accuracy * 100,
                    len(validation_bottlenecks)))
 
+    # Stop timer after training loop
+    end_time = time.perf_counter()
+    training_time = end_time - start_time
+    print(f"Training Time: {training_time:.4f} seconds")
+
+    # Save to log file
+    with open("training_time_log.txt", "a") as f:
+        f.write(f"{training_time:.4f}\n")
+
     # We've completed all our training, so run a final test evaluation on
     # some new images we haven't used before.
     test_bottlenecks, test_ground_truth, test_filenames = (
@@ -919,7 +932,7 @@ def main(_):
                                     list(image_lists.keys())[predictions[i]]))
 
     # Write out the trained graph and labels with the weights stored as constants.
-    output_graph_def = tf.compat.v1.graph_util.convert_variables_to_constants(
+    output_graph_def = convert_variables_to_constants(
         sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
         f.write(output_graph_def.SerializeToString())
@@ -968,8 +981,8 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
     recall = round(recall_score(y_true, y_pred, average='weighted', zero_division=0), 4)
 
     print('Run %d | F1: %.4f | Precision: %.4f | Recall: %.4f' % (run_number, f1, precision, recall))
-    print(classification_report(y_true, y_pred, target_names=labels_list, zero_division=0))
-
+    print(classification_report(y_true, y_pred, labels=list(range(len(labels_list))), target_names=labels_list, zero_division=0))
+ 
     # Writes to the f1_results.csv file
     os.makedirs(metrics_output_dir, exist_ok=True)
     csv_path = os.path.join(metrics_output_dir, 'f1_results.csv')
@@ -1164,16 +1177,16 @@ if __name__ == '__main__':
     parser.add_argument(
         '--metrics_output_dir',
         type=str,
-        default='../../../results',
+        default='../../../measurements',
         help='Directory to write F1 CSV results.'
     )
     FLAGS, unparsed = parser.parse_known_args()
 
-    # Reset the f1 results CSV at the start of each run
-    os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
-    csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
-    if os.path.isfile(csv_path):
-        os.remove(csv_path)
+    # # Reset the f1 results CSV at the start of each run
+    # os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
+    # if os.path.isfile(csv_path):
+    #     os.remove(csv_path)
 
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
     all_f1, all_precision, all_recall = [], [], []
@@ -1211,19 +1224,20 @@ if __name__ == '__main__':
     avg_precision = round(float(np.mean(all_precision)), 4)
     avg_recall = round(float(np.mean(all_recall)), 4)
 
-    print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
-        FLAGS.eval_runs, avg_f1, avg_precision, avg_recall))
+    ### ORIGINAL AVERAGE PRINTING AND CSV LOGGING FOR F1 SCORE - COMMENTED OUT TO PREVENT DUPLICATE LOGGING DURING MULTIPLE RUNS, BUT CAN BE RE-ENABLED IF DESIRED. ###
+    # print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
+    #     FLAGS.eval_runs, avg_f1, avg_precision, avg_recall))
 
-    csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
-    with open(csv_path, 'a', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=[
-            'timestamp', 'run_id', 'run_number',
-            'f1_weighted', 'precision_weighted', 'recall_weighted'])
-        writer.writerow({
-            'timestamp': datetime.now().isoformat(timespec='seconds'),
-            'run_id': FLAGS.run_id + '_AVG',
-            'run_number': 0,
-            'f1_weighted': avg_f1,
-            'precision_weighted': avg_precision,
-            'recall_weighted': avg_recall,
-        })
+    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
+    # with open(csv_path, 'a', newline='') as csvfile:
+    #     writer = csv.DictWriter(csvfile, fieldnames=[
+    #         'timestamp', 'run_id', 'run_number',
+    #         'f1_weighted', 'precision_weighted', 'recall_weighted'])
+    #     writer.writerow({
+    #         'timestamp': datetime.now().isoformat(timespec='seconds'),
+    #         'run_id': FLAGS.run_id + '_AVG',
+    #         'run_number': 0,
+    #         'f1_weighted': avg_f1,
+    #         'precision_weighted': avg_precision,
+    #         'recall_weighted': avg_recall,
+    #     })
