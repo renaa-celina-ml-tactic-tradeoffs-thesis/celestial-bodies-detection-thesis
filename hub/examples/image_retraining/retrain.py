@@ -73,12 +73,13 @@ import re
 import struct
 import sys
 import tarfile
+import time
 
 import numpy as np
 from six.moves import urllib
-import tensorflow as tf
 
-from tensorflow.python.framework import graph_util
+import tensorflow as tf
+from tensorflow.compat.v1.graph_util import convert_variables_to_constants
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
@@ -845,6 +846,9 @@ def main(_):
     sess.run(init)
 
     # Run the training for as many cycles as requested on the command line.
+    # Start timer before training loop
+    start_time = time.perf_counter()
+
     for i in range(FLAGS.how_many_training_steps):
         # Get a batch of input bottleneck values, either calculated fresh every time
         # with distortions applied, or from the cache stored on disk.
@@ -892,6 +896,15 @@ def main(_):
                   (datetime.now(), i, validation_accuracy * 100,
                    len(validation_bottlenecks)))
 
+    # Stop timer after training loop
+    end_time = time.perf_counter()
+    training_time = end_time - start_time
+    print(f"Training Time: {training_time:.4f} seconds")
+
+    # Save to log file
+    with open("training_time_log.txt", "a") as f:
+        f.write(f"{training_time:.4f}\n")
+
     # We've completed all our training, so run a final test evaluation on
     # some new images we haven't used before.
     test_bottlenecks, test_ground_truth, test_filenames = (
@@ -914,7 +927,7 @@ def main(_):
                                     list(image_lists.keys())[predictions[i]]))
 
     # Write out the trained graph and labels with the weights stored as constants.
-    output_graph_def = graph_util.convert_variables_to_constants(
+    output_graph_def = convert_variables_to_constants(
         sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
         f.write(output_graph_def.SerializeToString())
