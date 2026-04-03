@@ -1,12 +1,22 @@
-$RUNS = 3
-$RUN_ID = "baseline"
-$ROOT = "C:\Users\celin\Celina\repo\celestial-bodies-detection-thesis"
-$TRAIN_DIR = "$ROOT\hub\examples\image_retraining"
-$LOGFILE = "$ROOT\measurements\measurement_log.txt"
-$csv = "$ROOT\measurements\f1_results.csv"
-New-Item -ItemType Directory -Force -Path "$ROOT\measurements" | Out-Null
+# This file is a script to run the image retraining process multiple times
+# and measure the training time for each run, as well as calculate the averages
+# scripts/measure_training_time.ps1
 
-cd $TRAIN_DIR
+# to run this script, open PowerShell and execute: 
+# .\measure_baseline.ps1
+
+$ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+$RUNS = 3 # Number of times to run the training process
+$RUN_ID = "baseline"
+$TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
+$MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
+$LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
+$csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv" # CSV file to store F1, precision, recall, and average
+
+New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
+
+Set-Location $TRAIN_DIR
 
 # Clear previous logs and CSV
 "" | Set-Content $LOGFILE
@@ -31,6 +41,7 @@ for ($i = 1; $i -le $RUNS; $i++) {
 
     $TIME = Select-String "Training Time:" run_output.txt |
         ForEach-Object { ($_.Line -split "\s+")[2] }
+
     $all_times += [double]$TIME
     Add-Content $LOGFILE "Run ${i}: $TIME seconds"
     Write-Host "Training time for run ${i}: $TIME seconds"
@@ -53,9 +64,10 @@ $avg_row = [PSCustomObject]@{
     precision_weighted = $avg_precision
     recall_weighted    = $avg_recall
 }
+
 $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
 Write-Host "`nDone. Results in $csv and $LOGFILE"
 
-cd $ROOT
+Set-Location $ROOT
