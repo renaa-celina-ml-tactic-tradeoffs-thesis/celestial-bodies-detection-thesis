@@ -120,7 +120,8 @@ def load_image_bytes(image_path: str, use_grayscale: bool) -> bytes:
     """
     with Image.open(image_path) as img:
         if use_grayscale:
-            img = img.convert('L')  # grayscale (1 channel)
+            img = img.convert('L')  # greyscale (1 channel)
+            # img = img.resize((64, 64))  # to reduce resolution, has been investigated but doesn't seem to help with accuracy and actually makes it worse, so not used in the final version
             img = img.convert('RGB')  # expand back to 3 channels (CRITICAL)
         else:
             img = img.convert('RGB')
