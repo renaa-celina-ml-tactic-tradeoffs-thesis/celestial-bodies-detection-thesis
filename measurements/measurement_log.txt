@@ -1,0 +1,5 @@
+
+Run 1: 35.5177 seconds
+Run 2: 34.4745 seconds
+Run 3: 33.8729 seconds
+Average training time: 34.6217 seconds
