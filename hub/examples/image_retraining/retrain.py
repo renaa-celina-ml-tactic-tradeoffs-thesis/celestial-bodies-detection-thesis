@@ -80,7 +80,7 @@ from six.moves import urllib
 
 import tensorflow as tf
 from tensorflow.compat.v1.graph_util import convert_variables_to_constants
-from tensorflow.python.framework import tensor_shape
+# from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
 
@@ -661,9 +661,9 @@ def add_input_distortions(flip_left_right, random_crop, random_scale,
     margin_scale = 1.0 + (random_crop / 100.0)
     resize_scale = 1.0 + (random_scale / 100.0)
     margin_scale_value = tf.constant(margin_scale)
-    resize_scale_value = tf.random.uniform(tensor_shape.scalar(),
-                                           minval=1.0,
-                                           maxval=resize_scale)
+    resize_scale_value = tf.random.uniform(shape=[],
+                                       minval=1.0,
+                                       maxval=resize_scale)
     scale_value = tf.multiply(margin_scale_value, resize_scale_value)
     precrop_width = tf.multiply(scale_value, MODEL_INPUT_WIDTH)
     precrop_height = tf.multiply(scale_value, MODEL_INPUT_HEIGHT)
@@ -681,9 +681,9 @@ def add_input_distortions(flip_left_right, random_crop, random_scale,
         flipped_image = cropped_image
     brightness_min = 1.0 - (random_brightness / 100.0)
     brightness_max = 1.0 + (random_brightness / 100.0)
-    brightness_value = tf.random.uniform(tensor_shape.scalar(),
-                                         minval=brightness_min,
-                                         maxval=brightness_max)
+    brightness_value = tf.random.uniform(shape=[],
+                                     minval=brightness_min,
+                                     maxval=brightness_max)
     brightened_image = tf.multiply(flipped_image, brightness_value)
     distort_result = tf.expand_dims(brightened_image, 0, name='DistortResult')
     return jpeg_data, distort_result
