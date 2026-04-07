@@ -1003,6 +1003,47 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
         })
     return f1, precision, recall
 
+def validate_directory(image_dir, allowedexts=('.jpg', '.jpeg', '.JPG', '.JPEG'), verbose=False):
+    """
+    Checks all images in a directory tree for extension, nonzero size, and decodability.
+    Returns a dict with counts and failed files.
+    """
+    import tensorflow as tf
+    from tensorflow.python.platform import gfile
+
+    total = 0
+    passed = 0
+    failed = []
+    for root, _, files in os.walk(image_dir):
+        for fname in files:
+            if not fname.endswith(allowedexts):
+                continue
+            fpath = os.path.join(root, fname)
+            total += 1
+            # Check file size
+            if os.path.getsize(fpath) == 0:
+                failed.append(fpath)
+                if verbose:
+                    print(f"Zero size: {fpath}")
+                continue
+            # Check decodability
+            try:
+                with open(fpath, "rb") as f:
+                    img_bytes = f.read()
+                tf.image.decode_jpeg(img_bytes)
+            except Exception as e:
+                failed.append(fpath)
+                if verbose:
+                    print(f"Decode failed: {fpath} ({e})")
+                continue
+            passed += 1
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "score": passed / total if total else 0.0
+    }
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1187,6 +1228,24 @@ if __name__ == '__main__':
     # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
     # if os.path.isfile(csv_path):
     #     os.remove(csv_path)
+
+
+#--- Reliability Score Section ---
+    report = validate_directory(FLAGS.image_dir)
+    print(f"Reliability Score: {report['score']:.3f} ({report['passed']}/{report['total']} valid images)")
+    if report['failed']:
+        print("Failed files (first 5):", report['failed'][:5])
+    # Optionally, write to a file
+    os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+    reliability_path = os.path.join(FLAGS.metrics_output_dir, "reliability_score.txt")
+    with open(reliability_path, "w") as f:
+        f.write(f"Reliability Score: {report['score']:.3f} ({report['passed']}/{report['total']} valid images)\n")
+        if report['failed']:
+            f.write("Failed files:\n")
+            for path in report['failed']:
+                f.write(path + "\n")
+
+    # --- End Reliability Score Section ---
 
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
     all_f1, all_precision, all_recall = [], [], []
