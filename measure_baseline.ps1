@@ -39,9 +39,9 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --run_id=$RUN_ID `
         --flip_left_right `
         --random_crop=10 `
-        --random_scale=10 ` 
+        --random_scale=10 `
         --random_brightness=10 `
-        --eval_runs=1 2>&1 | Tee-Object run_output.txt 
+        --eval_runs=1 2>&1 | Tee-Object run_output.txt
         
 
     $TIME = Select-String "Training Time:" run_output.txt |
