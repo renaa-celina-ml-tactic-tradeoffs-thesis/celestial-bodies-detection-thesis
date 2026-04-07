@@ -40,9 +40,9 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --eval_runs=1 2>&1 | Tee-Object run_output.txt
 
     $TIME = Select-String "Training Time:" run_output.txt |
-        ForEach-Object { ($_.Line -split "\s+")[2] }
+        ForEach-Object { [double](($_.Line -split "\s+")[2]) }
 
-    $all_times += [double]$TIME
+    $all_times += $TIMES
     Add-Content $LOGFILE "Run ${i}: $TIME seconds"
     Write-Host "Training time for run ${i}: $TIME seconds"
 }
