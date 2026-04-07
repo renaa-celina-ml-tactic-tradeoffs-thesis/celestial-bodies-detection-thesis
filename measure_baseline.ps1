@@ -37,7 +37,12 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --output_labels=retrained_labels.txt `
         --test_dir=test_data `
         --run_id=$RUN_ID `
-        --eval_runs=1 2>&1 | Tee-Object run_output.txt
+        --eval_runs=1 2>&1 | Tee-Object run_output.txt `
+        # Data preprocessing flags
+        --flip_left_right `
+        --random_crop `
+        --random_scale ` 
+        --random_brightness
 
     $TIME = Select-String "Training Time:" run_output.txt |
         ForEach-Object { ($_.Line -split "\s+")[2] }
