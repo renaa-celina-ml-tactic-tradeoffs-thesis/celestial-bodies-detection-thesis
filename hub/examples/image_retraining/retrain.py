@@ -856,11 +856,8 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             cross_entropy_mean = tf.reduce_mean(input_tensor=cross_entropy)
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
-    with tf.compat.v1.name_scope('train'):
-        # Adam converges significantly faster than vanilla SGD, allowing the
-        # same validation accuracy to be reached in fewer training steps.
-        train_step = tf.compat.v1.train.AdamOptimizer(FLAGS.learning_rate).minimize(
-            cross_entropy_mean)
+    with tf.compat.v1.name_scope('train'):    
+        train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(cross_entropy_mean)
 
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor)
