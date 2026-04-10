@@ -982,16 +982,10 @@ def main(_):
         is_last_step = (i + 1 == FLAGS.how_many_training_steps)
         is_eval_step = ((i % FLAGS.eval_step_interval) == 0 or is_last_step)
 
-        if is_eval_step:
-            train_summary, _ = sess.run([merged, train_step],
-                                        feed_dict={bottleneck_input: train_bottlenecks,
-                                                   ground_truth_input: train_ground_truth})
-            train_writer.add_summary(train_summary, i)
-        else:
-            # Skip summary merge on non-eval steps — significantly reduces overhead.
-            sess.run(train_step,
-                     feed_dict={bottleneck_input: train_bottlenecks,
-                                ground_truth_input: train_ground_truth})
+        train_summary, _ = sess.run([merged, train_step],
+                                    feed_dict={bottleneck_input: train_bottlenecks,
+                                               ground_truth_input: train_ground_truth})
+        train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
         if is_eval_step:
