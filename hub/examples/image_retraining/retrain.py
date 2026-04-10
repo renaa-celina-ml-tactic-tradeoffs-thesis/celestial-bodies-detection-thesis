@@ -857,8 +857,10 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):    
-        train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(cross_entropy_mean)
-
+        # Adam converges significantly faster than vanilla SGD, allowing the
+        # same validation accuracy to be reached in fewer training steps.
+        train_step = tf.compat.v1.train.AdamOptimizer(FLAGS.learning_rate).minimize(
+            cross_entropy_mean)
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor)
 
@@ -960,13 +962,6 @@ def main(_):
     # Start timer before training loop
     start_time = time.perf_counter()
 
-    # Early stopping state: halt if validation accuracy hasn't improved by
-    # more than early_stopping_min_delta for early_stopping_patience consecutive
-    # evaluation intervals.
-    best_val_accuracy = 0.0
-    no_improve_count = 0
-    early_stopping_patience = FLAGS.early_stopping_patience
-    early_stopping_min_delta = FLAGS.early_stopping_min_delta
 
     for i in range(FLAGS.how_many_training_steps):
         # Get a batch of input bottleneck values, either from the pre-built pool
@@ -1024,19 +1019,6 @@ def main(_):
                   (datetime.now(), i, validation_accuracy * 100,
                    len(validation_bottlenecks)))
 
-            # Early stopping check
-            if validation_accuracy > best_val_accuracy + early_stopping_min_delta:
-                best_val_accuracy = validation_accuracy
-                no_improve_count = 0
-            else:
-                no_improve_count += 1
-            if early_stopping_patience > 0 and no_improve_count >= early_stopping_patience:
-                print('%s: Early stopping triggered at step %d '
-                      '(no improvement for %d eval intervals). '
-                      'Best validation accuracy = %.1f%%' % (
-                          datetime.now(), i, no_improve_count,
-                          best_val_accuracy * 100))
-                break
 
     # Stop timer after training loop
     end_time = time.perf_counter()
@@ -1344,25 +1326,6 @@ if __name__ == '__main__':
       Higher values give more augmentation variety at the cost of RAM and
       pool-build time. Increase if you have many GB of free RAM; decrease if
       memory is tight or if pool build time itself becomes a bottleneck.\
-      """
-    )
-    parser.add_argument(
-        '--early_stopping_patience',
-        type=int,
-        default=10,
-        help="""\
-      Number of consecutive evaluation intervals with no improvement in
-      validation accuracy before training is halted early.
-      Set to 0 to disable early stopping entirely.\
-      """
-    )
-    parser.add_argument(
-        '--early_stopping_min_delta',
-        type=float,
-        default=0.005,
-        help="""\
-      Minimum improvement in validation accuracy (as a fraction, e.g. 0.005 = 0.5%%)
-      required to reset the early-stopping patience counter.\
       """
     )
     parser.add_argument( 
