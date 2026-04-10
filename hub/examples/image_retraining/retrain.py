@@ -931,7 +931,16 @@ def main(_):
                 print('%70s  %s' % (test_filename,
                                     list(image_lists.keys())[predictions[i]]))
 
-    # Write out the trained graph and labels with the weights stored as constants.
+    # Prune the final layer weights before saving
+    prune_threshold = 0.2  # Experiment with this value for your thesis!
+    graph_variables = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.GLOBAL_VARIABLES)
+    weights_var = [v for v in graph_variables if 'final_weights' in v.name][0]
+
+    weights = sess.run(weights_var)
+    pruned_weights = np.where(np.abs(weights) < prune_threshold, 0, weights)
+    sess.run(weights_var.assign(pruned_weights))
+
+    # Save the pruned model
     output_graph_def = convert_variables_to_constants(
         sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
