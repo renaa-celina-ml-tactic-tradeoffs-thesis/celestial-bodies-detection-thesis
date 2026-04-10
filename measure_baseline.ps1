@@ -7,7 +7,7 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 10 # Number of times to run the training process
+$RUNS = 3 # Number of times to run the training process
 $RUN_ID = "baseline"
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
@@ -41,6 +41,9 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --random_crop=10 `
         --random_scale=10 `
         --random_brightness=10 `
+        --augmentations_per_image=3 `
+        --early_stopping_patience=10 `
+        --early_stopping_min_delta=0.005 `
         --eval_runs=1 2>&1 | Tee-Object run_output.txt
         
 
