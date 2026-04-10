@@ -1182,62 +1182,47 @@ if __name__ == '__main__':
     )
     FLAGS, unparsed = parser.parse_known_args()
 
-    # # Reset the f1 results CSV at the start of each run
-    # os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
-    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
-    # if os.path.isfile(csv_path):
-    #     os.remove(csv_path)
+    hyperparameter_configs = [
+        {'learning_rate': 0.01,  'how_many_training_steps': 4000, 'train_batch_size': 100},  # baseline
+        {'learning_rate': 0.001, 'how_many_training_steps': 4000, 'train_batch_size': 100},  # lower lr
+        {'learning_rate': 0.05,  'how_many_training_steps': 4000, 'train_batch_size': 100},  # higher lr
+        {'learning_rate': 0.01,  'how_many_training_steps': 2000, 'train_batch_size': 100},  # fewer steps
+        {'learning_rate': 0.01,  'how_many_training_steps': 6000, 'train_batch_size': 100},  # more steps
+    ]
 
-    # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
-    all_f1, all_precision, all_recall = [], [], []
+    for config in hyperparameter_configs:
+        FLAGS.learning_rate = config['learning_rate']
+        FLAGS.how_many_training_steps = config['how_many_training_steps']
+        FLAGS.train_batch_size = config['train_batch_size']
 
-    for run_num in range(1, FLAGS.eval_runs + 1):
-        print('\n=== Training + Eval Run %d/%d (run_id: %s) ===' % (
-            run_num, FLAGS.eval_runs, FLAGS.run_id))
-        tf.compat.v1.reset_default_graph()
-        tf.compat.v1.disable_eager_execution()
-        # Call main() directly instead of via app.run() to prevent sys.exit()
-        main([sys.argv[0]] + unparsed)            
+        run_id = 'lr%s_steps%d' % (config['learning_rate'], config['how_many_training_steps'])
 
- 
+        all_f1, all_precision, all_recall = [], [], []
 
-        # Load the saved graph and evaluate F1 on the fixed test set
-        eval_graph = tf.compat.v1.Graph()
-        with eval_graph.as_default():
-            graph_def = tf.compat.v1.GraphDef()
-            with gfile.FastGFile(FLAGS.output_graph, 'rb') as f:
-                graph_def.ParseFromString(f.read())
-            tf.import_graph_def(graph_def, name='') 
-        # Read the labels from the output_labels file to ensure correct mapping of predicted indices to class names.
-        labels_list = [l.strip() for l in open(FLAGS.output_labels).readlines()]
+        for run_num in range(1, FLAGS.eval_runs + 1):
+            print('\n=== Config: %s | Run %d/%d ===' % (run_id, run_num, FLAGS.eval_runs))
+            tf.compat.v1.reset_default_graph()
+            tf.compat.v1.disable_eager_execution()
+            main([sys.argv[0]] + unparsed)
 
-        # Run the F1 evaluation on the test set and log the results.
-        with tf.compat.v1.Session(graph=eval_graph) as eval_sess:
-            f1, precision, recall = f1_test_set_evaluation(
-                eval_sess, labels_list, FLAGS.test_dir,
-                FLAGS.run_id, run_num, FLAGS.metrics_output_dir)
-            all_f1.append(f1)
-            all_precision.append(precision)
-            all_recall.append(recall)
+            eval_graph = tf.compat.v1.Graph()
+            with eval_graph.as_default():
+                graph_def = tf.compat.v1.GraphDef()
+                with gfile.FastGFile(FLAGS.output_graph, 'rb') as f:
+                    graph_def.ParseFromString(f.read())
+                tf.import_graph_def(graph_def, name='')
+            labels_list = [l.strip() for l in open(FLAGS.output_labels).readlines()]
 
-    avg_f1 = round(float(np.mean(all_f1)), 4)
-    avg_precision = round(float(np.mean(all_precision)), 4)
-    avg_recall = round(float(np.mean(all_recall)), 4)
+            with tf.compat.v1.Session(graph=eval_graph) as eval_sess:
+                f1, precision, recall = f1_test_set_evaluation(
+                    eval_sess, labels_list, FLAGS.test_dir,
+                    run_id, run_num, FLAGS.metrics_output_dir)
+                all_f1.append(f1)
+                all_precision.append(precision)
+                all_recall.append(recall)
 
-    ### ORIGINAL AVERAGE PRINTING AND CSV LOGGING FOR F1 SCORE - COMMENTED OUT TO PREVENT DUPLICATE LOGGING DURING MULTIPLE RUNS, BUT CAN BE RE-ENABLED IF DESIRED. ###
-    # print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
-    #     FLAGS.eval_runs, avg_f1, avg_precision, avg_recall))
-
-    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
-    # with open(csv_path, 'a', newline='') as csvfile:
-    #     writer = csv.DictWriter(csvfile, fieldnames=[
-    #         'timestamp', 'run_id', 'run_number',
-    #         'f1_weighted', 'precision_weighted', 'recall_weighted'])
-    #     writer.writerow({
-    #         'timestamp': datetime.now().isoformat(timespec='seconds'),
-    #         'run_id': FLAGS.run_id + '_AVG',
-    #         'run_number': 0,
-    #         'f1_weighted': avg_f1,
-    #         'precision_weighted': avg_precision,
-    #         'recall_weighted': avg_recall,
-    #     })
+        avg_f1 = round(float(np.mean(all_f1)), 4)
+        avg_precision = round(float(np.mean(all_precision)), 4)
+        avg_recall = round(float(np.mean(all_recall)), 4)
+        print('\n=== Config %s | AVG F1: %.4f | AVG Precision: %.4f | AVG Recall: %.4f ===' % (
+            run_id, avg_f1, avg_precision, avg_recall))
