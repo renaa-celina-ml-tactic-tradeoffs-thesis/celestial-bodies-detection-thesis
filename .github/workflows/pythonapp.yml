@@ -36,3 +36,4 @@ jobs:
         path: |
           measurements/f1_results.csv
           measurements/measurement_log.txt
+          measurements/reliability_score.txt

@@ -13,6 +13,7 @@ $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retra
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
 $LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
 $csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv" # CSV file to store F1, precision, recall, and average
+$score_file = Join-Path $MEASUREMENTS_DIR "reliability_score.txt" # File to store the reliability score
 
 New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
@@ -69,5 +70,14 @@ $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
 Write-Host "`nDone. Results in $csv and $LOGFILE"
+
+# Read and display the reliability score
+if (Test-Path $score_file) {
+    $reliability = Get-Content $score_file | Select-Object -First 1
+    Write-Host "`nReliability Score: $reliability"
+    Add-Content $LOGFILE "Reliability Score: $reliability"
+} else {
+    Write-Host "`nReliability score file not found."
+}
 
 Set-Location $ROOT
