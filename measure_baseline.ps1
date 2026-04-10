@@ -42,7 +42,7 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --random_scale=10 `
         --random_brightness=10 `
         --augmentations_per_image=3 `
-        --early_stopping_patience=10 `
+        --early_stopping_patience=0 `
         --early_stopping_min_delta=0.005 `
         --eval_runs=1 2>&1 | Tee-Object run_output.txt
         
