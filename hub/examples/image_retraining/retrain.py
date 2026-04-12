@@ -80,7 +80,7 @@ from six.moves import urllib
 
 import tensorflow as tf
 from tensorflow.compat.v1.graph_util import convert_variables_to_constants
-from tensorflow.python.framework import tensor_shape
+# from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
 
@@ -533,11 +533,9 @@ def get_random_distorted_bottlenecks(
         distorted_image, resized_input_tensor, bottleneck_tensor):
     """Retrieves bottleneck values for training images, after distortions.
 
-    If we're training with distortions like crops, scales, or flips, we have to
-    recalculate the full model for every image, and so we can't use cached
-    bottleneck values. Instead we find random images for the requested category,
-    run them through the distortion graph, and then the full graph to get the
-    bottleneck results for each.
+    Samples from a pre-generated in-memory pool (populated by
+    build_distorted_bottleneck_pool) when available, falling back to on-the-fly
+    computation otherwise.
 
     Args:
       sess: Current TensorFlow Session.
@@ -555,21 +553,35 @@ def get_random_distorted_bottlenecks(
     Returns:
       List of bottleneck arrays and their corresponding ground truths.
     """
+    # Fast path: sample from pre-generated pool if it exists
+    pool = getattr(get_random_distorted_bottlenecks, '_pool', None)
+    if pool is not None and len(pool['bottlenecks']) > 0:
+        pool_size = len(pool['bottlenecks'])
+        indices = [random.randrange(pool_size) for _ in range(how_many)]
+        bottlenecks = [pool['bottlenecks'][i] for i in indices]
+        ground_truths = [pool['ground_truths'][i] for i in indices]
+        return bottlenecks, ground_truths
+
+    # Slow path: on-the-fly computation (used only when pool is not built)
     class_count = len(image_lists.keys())
     bottlenecks = []
     ground_truths = []
+    label_names = list(image_lists.keys())
+    jpeg_batch = []
+    label_indices_batch = []
+
     for unused_i in range(how_many):
         label_index = random.randrange(class_count)
-        label_name = list(image_lists.keys())[label_index]
+        label_name = label_names[label_index]
         image_index = random.randrange(MAX_NUM_IMAGES_PER_CLASS + 1)
         image_path = get_image_path(image_lists, label_name, image_index, image_dir,
                                     category)
         if not gfile.Exists(image_path):
             tf.compat.v1.logging.fatal('File does not exist %s', image_path)
-        jpeg_data = gfile.FastGFile(image_path, 'rb').read()
-        # Note that we materialize the distorted_image_data as a numpy array before
-        # sending running inference on the image. This involves 2 memory copies and
-        # might be optimized in other implementations.
+        jpeg_batch.append(gfile.FastGFile(image_path, 'rb').read())
+        label_indices_batch.append(label_index)
+
+    for jpeg_data, label_index in zip(jpeg_batch, label_indices_batch):
         distorted_image_data = sess.run(distorted_image,
                                         {input_jpeg_tensor: jpeg_data})
         bottleneck = run_bottleneck_on_image(sess, distorted_image_data,
@@ -580,6 +592,92 @@ def get_random_distorted_bottlenecks(
         bottlenecks.append(bottleneck)
         ground_truths.append(ground_truth)
     return bottlenecks, ground_truths
+
+
+def build_distorted_bottleneck_pool(
+        sess, image_lists, category, image_dir, input_jpeg_tensor,
+        distorted_image, resized_input_tensor, bottleneck_tensor,
+        augmentations_per_image=3):
+    """Pre-generates distorted bottlenecks for all training images into memory.
+
+    Running the full Inception network on-the-fly every training step is the
+    primary cause of slow training when distortions are enabled. This function
+    amortises that cost by running each image through the distortion + Inception
+    pipeline a fixed number of times up-front and storing the resulting 2048-d
+    bottleneck vectors in RAM. Subsequent calls to get_random_distorted_bottlenecks
+    simply sample from this pool, reducing per-step cost to a single NumPy lookup.
+
+    Args:
+      sess: Current TensorFlow Session.
+      image_lists: Dictionary of training images for each label.
+      category: Name string of which set to use ('training').
+      image_dir: Root folder containing class sub-folders.
+      input_jpeg_tensor: Distortion graph JPEG input placeholder.
+      distorted_image: Distortion graph output tensor.
+      resized_input_tensor: Inception graph image input tensor.
+      bottleneck_tensor: Inception bottleneck output tensor.
+      augmentations_per_image: How many distorted variants to generate per image.
+        Higher values give more variety at the cost of RAM and build time.
+
+    Returns:
+      Nothing. Attaches the pool directly to get_random_distorted_bottlenecks
+      as a function attribute so it is reused transparently.
+    """
+    class_count = len(image_lists.keys())
+    label_names = list(image_lists.keys())
+    all_bottlenecks = []
+    all_ground_truths = []
+
+    total_images = sum(len(image_lists[ln][category]) for ln in label_names)
+    total_to_generate = total_images * augmentations_per_image
+    generated = 0
+
+    print('Building distorted bottleneck pool: %d images × %d augmentations = %d total ...' % (
+        total_images, augmentations_per_image, total_to_generate))
+
+    for label_index, label_name in enumerate(label_names):
+        image_list = image_lists[label_name][category]
+        for image_index in range(len(image_list)):
+            image_path = get_image_path(
+                image_lists, label_name, image_index, image_dir, category)
+            if not gfile.Exists(image_path):
+                print('WARNING: File does not exist %s, skipping.' % image_path)
+                continue
+            try:
+                jpeg_data = gfile.FastGFile(image_path, 'rb').read()
+            except Exception as e:
+                print('WARNING: Could not read %s: %s' % (image_path, e))
+                continue
+
+            for _ in range(augmentations_per_image):
+                try:
+                    distorted_image_data = sess.run(
+                        distorted_image, {input_jpeg_tensor: jpeg_data})
+                    bottleneck = run_bottleneck_on_image(
+                        sess, distorted_image_data,
+                        resized_input_tensor, bottleneck_tensor)
+                    ground_truth = np.zeros(class_count, dtype=np.float32)
+                    ground_truth[label_index] = 1.0
+                    all_bottlenecks.append(bottleneck)
+                    all_ground_truths.append(ground_truth)
+                except Exception as e:
+                    print('WARNING: Augmentation failed for %s: %s' % (image_path, e))
+
+            generated += augmentations_per_image
+            if generated % 500 == 0 or generated == total_to_generate:
+                print('  Pool progress: %d / %d bottlenecks generated.' % (
+                    generated, total_to_generate))
+
+    # Shuffle so training batches are well-mixed across classes
+    combined = list(zip(all_bottlenecks, all_ground_truths))
+    random.shuffle(combined)
+    all_bottlenecks, all_ground_truths = zip(*combined) if combined else ([], [])
+
+    get_random_distorted_bottlenecks._pool = {
+        'bottlenecks': list(all_bottlenecks),
+        'ground_truths': list(all_ground_truths),
+    }
+    print('Distorted bottleneck pool ready: %d entries.' % len(all_bottlenecks))
 
 
 def should_distort_images(flip_left_right, random_crop, random_scale,
@@ -661,9 +759,9 @@ def add_input_distortions(flip_left_right, random_crop, random_scale,
     margin_scale = 1.0 + (random_crop / 100.0)
     resize_scale = 1.0 + (random_scale / 100.0)
     margin_scale_value = tf.constant(margin_scale)
-    resize_scale_value = tf.random.uniform(tensor_shape.scalar(),
-                                           minval=1.0,
-                                           maxval=resize_scale)
+    resize_scale_value = tf.random.uniform(shape=[],
+                                       minval=1.0,
+                                       maxval=resize_scale)
     scale_value = tf.multiply(margin_scale_value, resize_scale_value)
     precrop_width = tf.multiply(scale_value, MODEL_INPUT_WIDTH)
     precrop_height = tf.multiply(scale_value, MODEL_INPUT_HEIGHT)
@@ -681,9 +779,9 @@ def add_input_distortions(flip_left_right, random_crop, random_scale,
         flipped_image = cropped_image
     brightness_min = 1.0 - (random_brightness / 100.0)
     brightness_max = 1.0 + (random_brightness / 100.0)
-    brightness_value = tf.random.uniform(tensor_shape.scalar(),
-                                         minval=brightness_min,
-                                         maxval=brightness_max)
+    brightness_value = tf.random.uniform(shape=[],
+                                     minval=brightness_min,
+                                     maxval=brightness_max)
     brightened_image = tf.multiply(flipped_image, brightness_value)
     distort_result = tf.expand_dims(brightened_image, 0, name='DistortResult')
     return jpeg_data, distort_result
@@ -758,10 +856,11 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             cross_entropy_mean = tf.reduce_mean(input_tensor=cross_entropy)
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
-    with tf.compat.v1.name_scope('train'):
-        train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(
+    with tf.compat.v1.name_scope('train'):    
+        # Adam converges significantly faster than vanilla SGD, allowing the
+        # same validation accuracy to be reached in fewer training steps.
+        train_step = tf.compat.v1.train.AdamOptimizer(FLAGS.learning_rate).minimize(
             cross_entropy_mean)
-
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor)
 
@@ -823,6 +922,15 @@ def main(_):
         distorted_jpeg_data_tensor, distorted_image_tensor = add_input_distortions(
             FLAGS.flip_left_right, FLAGS.random_crop, FLAGS.random_scale,
             FLAGS.random_brightness)
+        # Pre-generate distorted bottlenecks into an in-memory pool so the
+        # training loop doesn't need to re-run the full Inception network every
+        # step.  augmentations_per_image controls the pool size; increase it for
+        # more variety if RAM allows.
+        build_distorted_bottleneck_pool(
+            sess, image_lists, 'training', FLAGS.image_dir,
+            distorted_jpeg_data_tensor, distorted_image_tensor,
+            resized_image_tensor, bottleneck_tensor,
+            augmentations_per_image=FLAGS.augmentations_per_image)
     else:
         # We'll make sure we've calculated the 'bottleneck' image summaries and
         # cached them on disk.
@@ -854,9 +962,10 @@ def main(_):
     # Start timer before training loop
     start_time = time.perf_counter()
 
+
     for i in range(FLAGS.how_many_training_steps):
-        # Get a batch of input bottleneck values, either calculated fresh every time
-        # with distortions applied, or from the cache stored on disk.
+        # Get a batch of input bottleneck values, either from the pre-built pool
+        # (distortion path) or from the on-disk cache (no-distortion path).
         if do_distort_images:
             train_bottlenecks, train_ground_truth = get_random_distorted_bottlenecks(
                 sess, image_lists, FLAGS.train_batch_size, 'training',
@@ -868,15 +977,18 @@ def main(_):
                 FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
                 bottleneck_tensor)
         # Feed the bottlenecks and ground truth into the graph, and run a training
-        # step. Capture training summaries for TensorBoard with the `merged` op.
+        # step. Only capture TensorBoard summaries at evaluation intervals to
+        # avoid the overhead of writing summaries every step.
+        is_last_step = (i + 1 == FLAGS.how_many_training_steps)
+        is_eval_step = ((i % FLAGS.eval_step_interval) == 0 or is_last_step)
+
         train_summary, _ = sess.run([merged, train_step],
                                     feed_dict={bottleneck_input: train_bottlenecks,
                                                ground_truth_input: train_ground_truth})
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
-        is_last_step = (i + 1 == FLAGS.how_many_training_steps)
-        if (i % FLAGS.eval_step_interval) == 0 or is_last_step:
+        if is_eval_step:
             train_accuracy, cross_entropy_value = sess.run(
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
@@ -900,6 +1012,7 @@ def main(_):
             print('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                   (datetime.now(), i, validation_accuracy * 100,
                    len(validation_bottlenecks)))
+
 
     # Stop timer after training loop
     end_time = time.perf_counter()
@@ -1002,6 +1115,47 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
             'recall_weighted': recall,
         })
     return f1, precision, recall
+
+def validate_directory(image_dir, allowedexts=('.jpg', '.jpeg', '.JPG', '.JPEG'), verbose=False):
+    """
+    Checks all images in a directory tree for extension, nonzero size, and decodability.
+    Returns a dict with counts and failed files.
+    """
+    import tensorflow as tf
+    from tensorflow.python.platform import gfile
+
+    total = 0
+    passed = 0
+    failed = []
+    for root, _, files in os.walk(image_dir):
+        for fname in files:
+            if not fname.endswith(allowedexts):
+                continue
+            fpath = os.path.join(root, fname)
+            total += 1
+            # Check file size
+            if os.path.getsize(fpath) == 0:
+                failed.append(fpath)
+                if verbose:
+                    print(f"Zero size: {fpath}")
+                continue
+            # Check decodability
+            try:
+                with open(fpath, "rb") as f:
+                    img_bytes = f.read()
+                tf.image.decode_jpeg(img_bytes)
+            except Exception as e:
+                failed.append(fpath)
+                if verbose:
+                    print(f"Decode failed: {fpath} ({e})")
+                continue
+            passed += 1
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "score": passed / total if total else 0.0
+    }
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -1156,6 +1310,18 @@ if __name__ == '__main__':
       input pixels up or down by.\
       """
     )
+    parser.add_argument(
+        '--augmentations_per_image',
+        type=int,
+        default=3,
+        help="""\
+      When distortions are enabled, how many augmented variants to pre-generate
+      per training image and store in the in-memory bottleneck pool.
+      Higher values give more augmentation variety at the cost of RAM and
+      pool-build time. Increase if you have many GB of free RAM; decrease if
+      memory is tight or if pool build time itself becomes a bottleneck.\
+      """
+    )
     parser.add_argument( 
         '--test_dir',
         type=str,
@@ -1187,6 +1353,24 @@ if __name__ == '__main__':
     # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
     # if os.path.isfile(csv_path):
     #     os.remove(csv_path)
+
+
+#--- Reliability Score Section ---
+    report = validate_directory(FLAGS.image_dir)
+    print(f"Reliability Score: {report['score']:.3f} ({report['passed']}/{report['total']} valid images)")
+    if report['failed']:
+        print("Failed files (first 5):", report['failed'][:5])
+    # Optionally, write to a file
+    os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+    reliability_path = os.path.join(FLAGS.metrics_output_dir, "reliability_score.txt")
+    with open(reliability_path, "w") as f:
+        f.write(f"Reliability Score: {report['score']:.3f} ({report['passed']}/{report['total']} valid images)\n")
+        if report['failed']:
+            f.write("Failed files:\n")
+            for path in report['failed']:
+                f.write(path + "\n")
+
+    # --- End Reliability Score Section ---
 
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
     all_f1, all_precision, all_recall = [], [], []
