@@ -88,6 +88,9 @@ from tensorflow.python.util import compat
 import csv
 from sklearn.metrics import (f1_score, precision_score, recall_score, classification_report)
 
+# Libraries for image processing (greyscale conversion)
+from PIL import Image
+import io
 
 FLAGS = None
 
@@ -109,6 +112,22 @@ MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
 
 tf.compat.v1.disable_eager_execution()
 
+
+def load_image_bytes(image_path: str, use_grayscale: bool) -> bytes:
+    """
+    Loads image and optionally converts to grayscale, then ensures 3 channels.
+    Returns JPEG-encoded bytes (required by TF graph).
+    """
+    with Image.open(image_path) as img:
+        if use_grayscale:
+            img = img.convert('L')  # greyscale (1 channel)
+            img = img.convert('RGB')  # expand back to 3 channels (CRITICAL)
+        else:
+            img = img.convert('RGB')
+
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG')
+        return buffer.getvalue()
 
 def create_image_lists(image_dir, testing_percentage, validation_percentage):
     """Builds a list of training images from the file system.
@@ -363,7 +382,8 @@ def create_bottleneck_file(bottleneck_path, image_lists, label_name, index,
         image_lists, label_name, index, image_dir, category)
     if not gfile.Exists(image_path):
         tf.compat.v1.logging.fatal('File does not exist %s', image_path)
-    image_data = gfile.FastGFile(image_path, 'rb').read()
+    # Change for ADR: load the image data and convert to greyscale if the flag is set
+    image_data = load_image_bytes(image_path, FLAGS.use_grayscale)
     bottleneck_values = run_bottleneck_on_image(
         sess, image_data, jpeg_data_tensor, bottleneck_tensor)
     bottleneck_string = ','.join(str(x) for x in bottleneck_values)
@@ -566,7 +586,8 @@ def get_random_distorted_bottlenecks(
                                     category)
         if not gfile.Exists(image_path):
             tf.compat.v1.logging.fatal('File does not exist %s', image_path)
-        jpeg_data = gfile.FastGFile(image_path, 'rb').read()
+        # Change for ADR: load the image data and convert to greyscale if the flag is set
+        jpeg_data = load_image_bytes(image_path, FLAGS.use_grayscale)
         # Note that we materialize the distorted_image_data as a numpy array before
         # sending running inference on the image. This involves 2 memory copies and
         # might be optimized in other implementations.
@@ -968,7 +989,8 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
     y_true, y_pred = [], []
     for img_path, true_idx in samples:
         try:
-            img_data = gfile.FastGFile(img_path, 'rb').read()
+            # Change for ADR: load the data and run inference on the raw image bytes
+            img_data = load_image_bytes(img_path, FLAGS.use_grayscale)
             predictions = sess.run(output_tensor, {input_tensor: img_data})
             y_true.append(true_idx)
             y_pred.append(int(np.argmax(predictions)))
@@ -1028,6 +1050,12 @@ if __name__ == '__main__':
         type=str,
         default='/tmp/retrain_logs',
         help='Where to save summary logs for TensorBoard.'
+    )
+    # Change for ADR: added flag to convert images to greyscale before processing
+    parser.add_argument(
+    '--use_grayscale',
+    action='store_true',
+    help='Convert images to grayscale before processing'
     )
     parser.add_argument(
         '--how_many_training_steps',
