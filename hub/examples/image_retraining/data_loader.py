@@ -1,8 +1,5 @@
 # data_loader.py
 # ML Lifecycle Stage: Data Ingestion
-# Responsible for discovering images on disk, assigning them to
-# train/test/validation splits, and resolving file paths.
-# No training logic, no model logic, no evaluation logic lives here.
 
 import os
 import re
@@ -14,12 +11,63 @@ from tensorflow.python.util import compat
 MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
 
 
+def _assign_split(file_name, testing_percentage, validation_percentage):
+    """Determines which split a file belongs to using its filename hash.
+    
+    Uses a stable SHA-1 hash so the same file always lands in the same
+    split, even if the dataset grows later.
+
+    Args:
+      file_name: Full file path string.
+      testing_percentage: Integer percentage reserved for testing.
+      validation_percentage: Integer percentage reserved for validation.
+
+    Returns:
+      String: 'training', 'testing', or 'validation'.
+    """
+    hash_name = re.sub(r'_nohash_.*$', '', file_name)
+    hash_name_hashed = hashlib.sha1(compat.as_bytes(hash_name)).hexdigest()
+    percentage_hash = ((int(hash_name_hashed, 16) %
+                        (MAX_NUM_IMAGES_PER_CLASS + 1)) *
+                       (100.0 / MAX_NUM_IMAGES_PER_CLASS))
+
+    if percentage_hash < validation_percentage:
+        return 'validation'
+    elif percentage_hash < (testing_percentage + validation_percentage):
+        return 'testing'
+    else:
+        return 'training'
+
+
+def _collect_files_for_class(image_dir, dir_name):
+    """Collects all JPEG file paths for a single class subfolder.
+
+    Args:
+      image_dir: Root image directory string.
+      dir_name: Name of the class subfolder.
+
+    Returns:
+      List of file path strings, or empty list if none found.
+    """
+    extensions = ['jpg', 'jpeg', 'JPG', 'JPEG']
+    file_list = []
+    for extension in extensions:
+        file_glob = os.path.join(image_dir, dir_name, '*.' + extension)
+        file_list.extend(gfile.Glob(file_glob))
+
+    if not file_list:
+        print('No files found')
+    elif len(file_list) < 20:
+        print('WARNING: Folder has less than 20 images, which may cause issues.')
+    elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
+        print('WARNING: Folder {} has more than {} images. Some images will '
+              'never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS))
+
+    return file_list
+
+
 def create_image_lists(image_dir, testing_percentage, validation_percentage):
     """Builds a list of training images from the file system.
-
-    Analyzes the sub folders in the image directory, splits them into stable
-    training, testing, and validation sets, and returns a data structure
-    describing the lists of images for each label and their paths.
 
     Args:
       image_dir: String path to a folder containing subfolders of images.
@@ -43,72 +91,35 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage):
             is_root_dir = False
             continue
 
-        extensions = ['jpg', 'jpeg', 'JPG', 'JPEG']
-        file_list = []
         dir_name = os.path.basename(sub_dir)
-
         if dir_name == image_dir:
             continue
 
         print("Looking for images in '" + dir_name + "'")
-
-        for extension in extensions:
-            file_glob = os.path.join(image_dir, dir_name, '*.' + extension)
-            file_list.extend(gfile.Glob(file_glob))
-
+        file_list = _collect_files_for_class(image_dir, dir_name)
         if not file_list:
-            print('No files found')
             continue
-        if len(file_list) < 20:
-            print('WARNING: Folder has less than 20 images, which may cause issues.')
-        elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
-            print('WARNING: Folder {} has more than {} images. Some images will '
-                  'never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS))
 
         label_name = re.sub(r'[^a-z0-9]+', ' ', dir_name.lower())
-        training_images = []
-        testing_images = []
-        validation_images = []
+        splits = {'training': [], 'testing': [], 'validation': []}
 
         for file_name in file_list:
             base_name = os.path.basename(file_name)
-            hash_name = re.sub(r'_nohash_.*$', '', file_name)
-            hash_name_hashed = hashlib.sha1(compat.as_bytes(hash_name)).hexdigest()
-            percentage_hash = ((int(hash_name_hashed, 16) %
-                                (MAX_NUM_IMAGES_PER_CLASS + 1)) *
-                               (100.0 / MAX_NUM_IMAGES_PER_CLASS))
-
-            if percentage_hash < validation_percentage:
-                validation_images.append(base_name)
-            elif percentage_hash < (testing_percentage + validation_percentage):
-                testing_images.append(base_name)
-            else:
-                training_images.append(base_name)
+            split = _assign_split(file_name, testing_percentage, validation_percentage)
+            splits[split].append(base_name)
 
         result[label_name] = {
             'dir': dir_name,
-            'training': training_images,
-            'testing': testing_images,
-            'validation': validation_images,
+            'training': splits['training'],
+            'testing': splits['testing'],
+            'validation': splits['validation'],
         }
 
     return result
 
 
 def get_image_path(image_lists, label_name, index, image_dir, category):
-    """Returns a path to an image for a label at the given index.
-
-    Args:
-      image_lists: Dictionary of training images for each label.
-      label_name: Label string we want to get an image for.
-      index: Int offset of the image we want. Moduloed by available images.
-      image_dir: Root folder string of the subfolders containing the images.
-      category: Name string of set to pull images from - training, testing,
-                or validation.
-
-    Returns:
-      File system path string to an image that meets the requested parameters.
-    """
+    """Returns a path to an image for a label at the given index."""
     import tensorflow as tf
     if label_name not in image_lists:
         tf.compat.v1.logging.fatal('Label does not exist %s.', label_name)
