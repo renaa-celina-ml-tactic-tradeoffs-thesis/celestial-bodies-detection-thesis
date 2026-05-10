@@ -26,7 +26,7 @@ if (Test-Path $csv) { Remove-Item $csv }
 
 # === Cyclomatic Complexity Measurement ===
 Write-Host "`n=== Measuring Cyclomatic Complexity ==="
-python -m radon cc retrain.py data_loader.py bottleneck_cache.py augmentation.py model_trainer.py evaluator.py exporter.py -s
+$cc_raw = python -m radon cc retrain.py data_loader.py bottleneck_cache.py augmentation.py model_trainer.py evaluator.py exporter.py -s 2>&1
 
 # Save full individual function breakdown to file
 $cc_raw | Out-File $cc_file -Encoding utf8
