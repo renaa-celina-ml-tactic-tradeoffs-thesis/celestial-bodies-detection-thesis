@@ -7,7 +7,7 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 3 # Number of times to run the training process
+$RUNS = 2 # Number of times to run the training process
 $RUN_ID = "baseline"
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
@@ -75,13 +75,13 @@ Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recal
 if (Test-Path $score_file) {
     $reliability_lines = Get-Content $score_file
     $consistency_line = $reliability_lines | Where-Object { $_ -match "^Consistency Score:" }
-    $instability_line = $reliability_lines | Where-Object { $_ -match "^Mean Instability:" }
+    $instability_line = $reliability_lines | Where-Object { $_ -match "^Mean Instability \(" }
     $num_images_line  = $reliability_lines | Where-Object { $_ -match "^Number of test images evaluated:" }
 
     if ($consistency_line) {
-        $consistency_score = ($consistency_line -split ":\s*")[1].Trim()
-        $instability_score = ($instability_line -split ":\s*")[1].Trim()
-        $num_images        = ($num_images_line  -split ":\s*")[1].Trim()
+        $consistency_score = ($consistency_line -split ":\s*")[-1].Trim()
+        $instability_score = ($instability_line -split ":\s*")[-1].Trim()
+        $num_images        = ($num_images_line  -split ":\s*")[-1].Trim()
 
         Add-Content $LOGFILE "Consistency Score: $consistency_score"
         Add-Content $LOGFILE "Mean Instability: $instability_score"
