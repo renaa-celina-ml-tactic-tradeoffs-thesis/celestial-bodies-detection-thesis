@@ -7,7 +7,7 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 10 # Number of times to run the training process
+$RUNS = 2 # Number of times to run the training process
 $RUN_ID = "baseline"
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
@@ -26,7 +26,7 @@ if (Test-Path $csv) { Remove-Item $csv }
 
 # === Cyclomatic Complexity Measurement ===
 Write-Host "`n=== Measuring Cyclomatic Complexity ==="
-$cc_raw = python -m radon cc retrain.py -s 2>&1
+python -m radon cc retrain.py data_loader.py bottleneck_cache.py augmentation.py model_trainer.py evaluator.py exporter.py -s
 
 # Save full individual function breakdown to file
 $cc_raw | Out-File $cc_file -Encoding utf8
