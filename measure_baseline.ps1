@@ -7,21 +7,23 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 3 # Number of times to run the training process
-$TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining"
+$RUNS = 4 # Number of times to run the training process
+$RUN_ID = "baseline"
+$TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
 $LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
 $csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv" # CSV file to store F1, precision, recall, and average
 $score_file = Join-Path $MEASUREMENTS_DIR "reliability_score.txt" # File to store the reliability score
-$cc_file = Join-Path $MEASUREMENTS_DIR "cc_score.txt" # File to store cyclomatic complexity results   # <-- ADD THIS
+$cc_file = Join-Path $MEASUREMENTS_DIR "cc_score.txt" # File to store cyclomatic complexity results
 
 New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
 Set-Location $TRAIN_DIR
 
-# Clear previous logs, CSV, and reliability score
+# Clear previous logs and CSV
 "" | Set-Content $LOGFILE
 if (Test-Path $csv) { Remove-Item $csv }
+if (Test-Path $score_file) { Remove-Item $score_file }
 
 # === Cyclomatic Complexity Measurement ===
 Write-Host "`n=== Measuring Cyclomatic Complexity ==="
@@ -76,6 +78,7 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --output_graph=retrained_graph.pb `
         --output_labels=retrained_labels.txt `
         --test_dir=test_data `
+        --run_id=$RUN_ID `
         --eval_runs=1 2>&1 | Tee-Object run_output.txt
 
     $TIME = Select-String "Training Time:" run_output.txt |
@@ -87,12 +90,10 @@ for ($i = 1; $i -le $RUNS; $i++) {
     Write-Host "Training time for run ${i}: $TIME seconds"
 }
 
-# --- Training time average ---
 $avg_time = [math]::Round(($all_times | Measure-Object -Average).Average, 4)
 Add-Content $LOGFILE "Average training time: $avg_time seconds"
 Write-Host "`nAverage training time: $avg_time seconds"
 
-# --- F1, precision, recall average ---
 $rows = Import-Csv $csv
 $avg_f1 = [math]::Round(($rows | ForEach-Object { [double]$_.f1_weighted } | Measure-Object -Average).Average, 4)
 $avg_precision = [math]::Round(($rows | ForEach-Object { [double]$_.precision_weighted } | Measure-Object -Average).Average, 4)
@@ -100,6 +101,7 @@ $avg_recall = [math]::Round(($rows | ForEach-Object { [double]$_.recall_weighted
 
 $avg_row = [PSCustomObject]@{
     timestamp          = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+    run_id             = "${RUN_ID}_AVG"
     run_number         = 0
     f1_weighted        = $avg_f1
     precision_weighted = $avg_precision
@@ -117,13 +119,13 @@ $variance = ($f1_values | ForEach-Object { [math]::Pow($_ - $mean_f1, 2) } | Mea
 $std_dev = [math]::Round([math]::Sqrt($variance), 4)
 $consistency_score = [math]::Round(1.0 - $std_dev, 4)
 
-Add-Content $LOGFILE "Consistency Score: $consistency_score"
-Add-Content $LOGFILE "F1 Std Dev (instability): $std_dev"
-
 "Reliability Metric: Output Consistency Score" | Set-Content $score_file
 "Consistency Score: $consistency_score" | Add-Content $score_file
 "Mean Instability (F1 std dev across runs): $std_dev" | Add-Content $score_file
 "Number of runs: $($rows.Count)" | Add-Content $score_file
+
+Add-Content $LOGFILE "Consistency Score: $consistency_score"
+Add-Content $LOGFILE "F1 Std Dev (instability): $std_dev"
 
 Write-Host "`nReliability (Output Consistency Score): $consistency_score"
 Write-Host "F1 Std Dev across runs: $std_dev"
