@@ -7,8 +7,7 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 1 # Single outer run since repetition is handled inside Python via eval_runs
-$RUN_ID = "baseline"
+$RUNS = 3 # Number of times to run the training process
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining"
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
 $LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt"
@@ -38,10 +37,10 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --output_graph=retrained_graph.pb `
         --output_labels=retrained_labels.txt `
         --test_dir=test_data `
-        --run_id=$RUN_ID `
-        --eval_runs=10 2>&1 | Tee-Object run_output.txt
+        --eval_runs=1 2>&1 | Tee-Object run_output.txt
 
     $TIME = Select-String "Training Time:" run_output.txt |
+        Select-Object -First 1 |
         ForEach-Object { ($_.Line -split "\s+")[2] }
 
     $all_times += [double]$TIME
@@ -62,7 +61,6 @@ $avg_recall = [math]::Round(($rows | ForEach-Object { [double]$_.recall_weighted
 
 $avg_row = [PSCustomObject]@{
     timestamp          = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
-    run_id             = "${RUN_ID}_AVG"
     run_number         = 0
     f1_weighted        = $avg_f1
     precision_weighted = $avg_precision
