@@ -71,34 +71,24 @@ $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
 
-# --- Read and log the reliability score produced by retrain.py ---
-if (Test-Path $score_file) {
-    $reliability_lines = Get-Content $score_file
-    $consistency_line = $reliability_lines | Where-Object { $_ -match "^Consistency Score:" }
-    $instability_line = $reliability_lines | Where-Object { $_ -match "^Mean Instability \(" }
-    $num_images_line  = $reliability_lines | Where-Object { $_ -match "^Number of test images evaluated:" }
+# --- Reliability Score: F1 consistency across runs ---
+$f1_values = $rows | ForEach-Object { [double]$_.f1_weighted }
+$mean_f1 = ($f1_values | Measure-Object -Average).Average
+$variance = ($f1_values | ForEach-Object { [math]::Pow($_ - $mean_f1, 2) } | Measure-Object -Average).Average
+$std_dev = [math]::Round([math]::Sqrt($variance), 4)
+$consistency_score = [math]::Round(1.0 - $std_dev, 4)
 
-    if ($consistency_line) {
-        $consistency_score = ($consistency_line -split ":\s*")[-1].Trim()
-        $instability_score = ($instability_line -split ":\s*")[-1].Trim()
-        $num_images        = ($num_images_line  -split ":\s*")[-1].Trim()
+Add-Content $LOGFILE "Consistency Score: $consistency_score"
+Add-Content $LOGFILE "F1 Std Dev (instability): $std_dev"
 
-        Add-Content $LOGFILE "Consistency Score: $consistency_score"
-        Add-Content $LOGFILE "Mean Instability: $instability_score"
-        Add-Content $LOGFILE "Test images evaluated: $num_images"
+"Reliability Metric: Output Consistency Score" | Set-Content $score_file
+"Consistency Score: $consistency_score" | Add-Content $score_file
+"Mean Instability (F1 std dev across runs): $std_dev" | Add-Content $score_file
+"Number of runs: $($rows.Count)" | Add-Content $score_file
 
-        Write-Host "`nReliability (Output Consistency Score): $consistency_score"
-        Write-Host "Mean Instability: $instability_score"
-        Write-Host "Test images evaluated: $num_images"
-    } else {
-        Write-Host "WARNING: reliability_score.txt found but could not parse Consistency Score."
-        Add-Content $LOGFILE "WARNING: Could not parse reliability_score.txt"
-    }
-} else {
-    Write-Host "WARNING: reliability_score.txt not found. Reliability score may not have been generated."
-    Add-Content $LOGFILE "WARNING: reliability_score.txt not found."
-}
-# --- End reliability score logging ---
+Write-Host "`nReliability (Output Consistency Score): $consistency_score"
+Write-Host "F1 Std Dev across runs: $std_dev"
+# --- End reliability score ---
 
 Write-Host "`nDone. Results in $csv, $LOGFILE, and $score_file"
 

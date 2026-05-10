@@ -1190,7 +1190,7 @@ if __name__ == '__main__':
 
 
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
-    all_f1, all_precision, all_recall, all_run_predictions = [], [], [], []
+    all_f1, all_precision, all_recall = [], [], []
 
     for run_num in range(1, FLAGS.eval_runs + 1):
         print('\n=== Training + Eval Run %d/%d (run_id: %s) ===' % (
@@ -1220,7 +1220,7 @@ if __name__ == '__main__':
             all_f1.append(f1)
             all_precision.append(precision)
             all_recall.append(recall)
-            # --- Collect raw predictions for consistency scoring ---
+            # --- Append per-run probabilities for consistency scoring ---
             input_tensor = eval_sess.graph.get_tensor_by_name('DecodeJpeg/contents:0')
             output_tensor = eval_sess.graph.get_tensor_by_name('final_result:0')
             run_probs = []
@@ -1234,11 +1234,18 @@ if __name__ == '__main__':
                 try:
                     img_data = gfile.FastGFile(img_path, 'rb').read()
                     probs = eval_sess.run(output_tensor, {input_tensor: img_data})
-                    run_probs.append(probs[0])
+                    run_probs.append(probs[0].tolist())
                 except Exception as e:
                     print('WARNING: Consistency eval could not process %s: %s' % (img_path, str(e)))
-            all_run_predictions.append(np.array(run_probs))
-            # --- End consistency collection ---
+
+            # Append this run's probabilities as a single line to the probs file
+            os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+            probs_path = os.path.join(FLAGS.metrics_output_dir, 'consistency_probs.jsonl')
+            import json
+            with open(probs_path, 'a') as pf:
+                pf.write(json.dumps(run_probs) + '\n')
+            print('Appended run probabilities to %s' % probs_path)
+            # --- End probability collection ---
 
     avg_f1 = round(float(np.mean(all_f1)), 4)
     avg_precision = round(float(np.mean(all_precision)), 4)
