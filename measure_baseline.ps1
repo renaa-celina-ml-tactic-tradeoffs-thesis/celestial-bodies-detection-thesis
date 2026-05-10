@@ -19,9 +19,10 @@ New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
 Set-Location $TRAIN_DIR
 
-# Clear previous logs and CSV
+# Clear previous logs, CSV, and reliability score
 "" | Set-Content $LOGFILE
 if (Test-Path $csv) { Remove-Item $csv }
+if (Test-Path $score_file) { Remove-Item $score_file }
 
 $all_times = @()
 
@@ -69,7 +70,36 @@ $avg_row = [PSCustomObject]@{
 $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
-Write-Host "`nDone. Results in $csv and $LOGFILE"
 
+# --- Read and log the reliability score produced by retrain.py ---
+if (Test-Path $score_file) {
+    $reliability_lines = Get-Content $score_file
+    $consistency_line = $reliability_lines | Where-Object { $_ -match "^Consistency Score:" }
+    $instability_line = $reliability_lines | Where-Object { $_ -match "^Mean Instability:" }
+    $num_images_line  = $reliability_lines | Where-Object { $_ -match "^Number of test images evaluated:" }
+
+    if ($consistency_line) {
+        $consistency_score = ($consistency_line -split ":\s*")[1].Trim()
+        $instability_score = ($instability_line -split ":\s*")[1].Trim()
+        $num_images        = ($num_images_line  -split ":\s*")[1].Trim()
+
+        Add-Content $LOGFILE "Consistency Score: $consistency_score"
+        Add-Content $LOGFILE "Mean Instability: $instability_score"
+        Add-Content $LOGFILE "Test images evaluated: $num_images"
+
+        Write-Host "`nReliability (Output Consistency Score): $consistency_score"
+        Write-Host "Mean Instability: $instability_score"
+        Write-Host "Test images evaluated: $num_images"
+    } else {
+        Write-Host "WARNING: reliability_score.txt found but could not parse Consistency Score."
+        Add-Content $LOGFILE "WARNING: Could not parse reliability_score.txt"
+    }
+} else {
+    Write-Host "WARNING: reliability_score.txt not found. Reliability score may not have been generated."
+    Add-Content $LOGFILE "WARNING: reliability_score.txt not found."
+}
+# --- End reliability score logging ---
+
+Write-Host "`nDone. Results in $csv, $LOGFILE, and $score_file"
 
 Set-Location $ROOT
