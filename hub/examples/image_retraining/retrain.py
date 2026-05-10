@@ -790,6 +790,12 @@ def add_evaluation_step(result_tensor, ground_truth_tensor):
 
 
 def main(_):
+    # --- Random Seed Fixation ---
+    random.seed(42)
+    np.random.seed(42)
+    tf.compat.v1.set_random_seed(42)
+    # --- End Random Seed Fixation ---
+
     # Setup the directory we'll write summaries to for TensorBoard
     if tf.io.gfile.exists(FLAGS.summaries_dir):
         tf.io.gfile.rmtree(FLAGS.summaries_dir)
