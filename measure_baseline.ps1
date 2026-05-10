@@ -71,13 +71,5 @@ $avg_row | Export-Csv $csv -Append -NoTypeInformation
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
 Write-Host "`nDone. Results in $csv and $LOGFILE"
 
-# Read and display the reliability score
-if (Test-Path $score_file) {
-    $reliability = Get-Content $score_file | Select-Object -First 1
-    Write-Host "`nReliability Score: $reliability"
-    Add-Content $LOGFILE "Reliability Score: $reliability"
-} else {
-    Write-Host "`nReliability score file not found."
-}
 
 Set-Location $ROOT
