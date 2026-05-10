@@ -14,7 +14,7 @@ $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
 $LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
 $csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv" # CSV file to store F1, precision, recall, and average
 $score_file = Join-Path $MEASUREMENTS_DIR "reliability_score.txt" # File to store the reliability score
-$cc_file = Join-Path $MEASUREMENTS_DIR "cc_score.txt" # File to store cyclomatic complexity results   # <-- ADD THIS
+$cc_file = Join-Path $MEASUREMENTS_DIR "cc_score.txt" # File to store cyclomatic complexity results
 
 New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
@@ -23,6 +23,7 @@ Set-Location $TRAIN_DIR
 # Clear previous logs and CSV
 "" | Set-Content $LOGFILE
 if (Test-Path $csv) { Remove-Item $csv }
+if (Test-Path $score_file) { Remove-Item $score_file }
 
 # === Cyclomatic Complexity Measurement ===
 Write-Host "`n=== Measuring Cyclomatic Complexity ==="
@@ -81,6 +82,7 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --eval_runs=1 2>&1 | Tee-Object run_output.txt
 
     $TIME = Select-String "Training Time:" run_output.txt |
+        Select-Object -First 1 |
         ForEach-Object { ($_.Line -split "\s+")[2] }
 
     $all_times += [double]$TIME
@@ -109,15 +111,26 @@ $avg_row = [PSCustomObject]@{
 $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
-Write-Host "`nDone. Results in $csv and $LOGFILE"
 
-# Read and display the reliability score
-if (Test-Path $score_file) {
-    $reliability = Get-Content $score_file | Select-Object -First 1
-    Write-Host "`nReliability Score: $reliability"
-    Add-Content $LOGFILE "Reliability Score: $reliability"
-} else {
-    Write-Host "`nReliability score file not found."
-}
+# --- Reliability Score: F1 consistency across runs ---
+$f1_values = $rows | ForEach-Object { [double]$_.f1_weighted }
+$mean_f1 = ($f1_values | Measure-Object -Average).Average
+$variance = ($f1_values | ForEach-Object { [math]::Pow($_ - $mean_f1, 2) } | Measure-Object -Average).Average
+$std_dev = [math]::Round([math]::Sqrt($variance), 4)
+$consistency_score = [math]::Round(1.0 - $std_dev, 4)
+
+"Reliability Metric: Output Consistency Score" | Set-Content $score_file
+"Consistency Score: $consistency_score" | Add-Content $score_file
+"Mean Instability (F1 std dev across runs): $std_dev" | Add-Content $score_file
+"Number of runs: $($rows.Count)" | Add-Content $score_file
+
+Add-Content $LOGFILE "Consistency Score: $consistency_score"
+Add-Content $LOGFILE "F1 Std Dev (instability): $std_dev"
+
+Write-Host "`nReliability (Output Consistency Score): $consistency_score"
+Write-Host "F1 Std Dev across runs: $std_dev"
+# --- End reliability score ---
+
+Write-Host "`nDone. Results in $csv, $LOGFILE, and $score_file"
 
 Set-Location $ROOT
