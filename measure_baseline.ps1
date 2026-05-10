@@ -7,7 +7,7 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 2 # Number of times to run the training process
+$RUNS = 4 # Number of times to run the training process
 $RUN_ID = "baseline"
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
 Set-Location $TRAIN_DIR
 
-# Clear previous logs, CSV, and reliability score
+# Clear previous logs and CSV
 "" | Set-Content $LOGFILE
 if (Test-Path $csv) { Remove-Item $csv }
 if (Test-Path $score_file) { Remove-Item $score_file }
@@ -70,6 +70,7 @@ $avg_row = [PSCustomObject]@{
 $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
+Write-Host "`nDone. Results in $csv and $LOGFILE"
 
 # --- Read and log the reliability score produced by retrain.py ---
 if (Test-Path $score_file) {
