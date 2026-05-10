@@ -7,19 +7,19 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$RUNS = 4 # Number of times to run the training process
+$RUNS = 1 # Single outer run since repetition is handled inside Python via eval_runs
 $RUN_ID = "baseline"
-$TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
+$TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining"
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
-$LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
-$csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv" # CSV file to store F1, precision, recall, and average
-$score_file = Join-Path $MEASUREMENTS_DIR "reliability_score.txt" # File to store the reliability score
+$LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt"
+$csv = Join-Path $MEASUREMENTS_DIR "f1_results.csv"
+$score_file = Join-Path $MEASUREMENTS_DIR "reliability_score.txt"
 
 New-Item -ItemType Directory -Force -Path $MEASUREMENTS_DIR | Out-Null
 
 Set-Location $TRAIN_DIR
 
-# Clear previous logs and CSV
+# Clear previous logs, CSV, and reliability score
 "" | Set-Content $LOGFILE
 if (Test-Path $csv) { Remove-Item $csv }
 if (Test-Path $score_file) { Remove-Item $score_file }
@@ -39,7 +39,7 @@ for ($i = 1; $i -le $RUNS; $i++) {
         --output_labels=retrained_labels.txt `
         --test_dir=test_data `
         --run_id=$RUN_ID `
-        --eval_runs=1 2>&1 | Tee-Object run_output.txt
+        --eval_runs=10 2>&1 | Tee-Object run_output.txt
 
     $TIME = Select-String "Training Time:" run_output.txt |
         ForEach-Object { ($_.Line -split "\s+")[2] }
@@ -49,10 +49,12 @@ for ($i = 1; $i -le $RUNS; $i++) {
     Write-Host "Training time for run ${i}: $TIME seconds"
 }
 
+# --- Training time average ---
 $avg_time = [math]::Round(($all_times | Measure-Object -Average).Average, 4)
 Add-Content $LOGFILE "Average training time: $avg_time seconds"
 Write-Host "`nAverage training time: $avg_time seconds"
 
+# --- F1, precision, recall average ---
 $rows = Import-Csv $csv
 $avg_f1 = [math]::Round(($rows | ForEach-Object { [double]$_.f1_weighted } | Measure-Object -Average).Average, 4)
 $avg_precision = [math]::Round(($rows | ForEach-Object { [double]$_.precision_weighted } | Measure-Object -Average).Average, 4)
@@ -70,7 +72,6 @@ $avg_row = [PSCustomObject]@{
 $avg_row | Export-Csv $csv -Append -NoTypeInformation
 
 Write-Host "Average F1: $avg_f1 | Precision: $avg_precision | Recall: $avg_recall"
-Write-Host "`nDone. Results in $csv and $LOGFILE"
 
 # --- Read and log the reliability score produced by retrain.py ---
 if (Test-Path $score_file) {
