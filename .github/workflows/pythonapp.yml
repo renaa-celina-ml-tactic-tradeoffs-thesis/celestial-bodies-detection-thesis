@@ -18,6 +18,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install scikit-learn
+        pip install radon
     - name: Lint with flake8
       run: |
         pip install flake8
@@ -37,3 +38,4 @@ jobs:
           measurements/f1_results.csv
           measurements/measurement_log.txt
           measurements/reliability_score.txt
+          measurements/cc_score.txt
