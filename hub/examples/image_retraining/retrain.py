@@ -1189,13 +1189,8 @@ if __name__ == '__main__':
     #     os.remove(csv_path)
 
 
-#--- Reliability Score Section ---
-    
-
-# --- End Reliability Score Section ---
-
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
-    all_f1, all_precision, all_recall = [], [], []
+    all_f1, all_precision, all_recall, all_run_predictions = [], [], [], []
 
     for run_num in range(1, FLAGS.eval_runs + 1):
         print('\n=== Training + Eval Run %d/%d (run_id: %s) ===' % (
@@ -1225,10 +1220,56 @@ if __name__ == '__main__':
             all_f1.append(f1)
             all_precision.append(precision)
             all_recall.append(recall)
+            # --- Collect raw predictions for consistency scoring ---
+            input_tensor = eval_sess.graph.get_tensor_by_name('DecodeJpeg/contents:0')
+            output_tensor = eval_sess.graph.get_tensor_by_name('final_result:0')
+            run_probs = []
+            for img_path, _ in sorted([
+                (os.path.join(FLAGS.test_dir, cls, fname), cls)
+                for cls in sorted(os.listdir(FLAGS.test_dir))
+                if os.path.isdir(os.path.join(FLAGS.test_dir, cls))
+                for fname in sorted(os.listdir(os.path.join(FLAGS.test_dir, cls)))
+                if fname.lower().endswith(('.jpg', '.jpeg', '.png'))
+            ]):
+                try:
+                    img_data = gfile.FastGFile(img_path, 'rb').read()
+                    probs = eval_sess.run(output_tensor, {input_tensor: img_data})
+                    run_probs.append(probs[0])
+                except Exception as e:
+                    print('WARNING: Consistency eval could not process %s: %s' % (img_path, str(e)))
+            all_run_predictions.append(np.array(run_probs))
+            # --- End consistency collection ---
 
     avg_f1 = round(float(np.mean(all_f1)), 4)
     avg_precision = round(float(np.mean(all_precision)), 4)
     avg_recall = round(float(np.mean(all_recall)), 4)
+
+    # --- Reliability Score: Output Consistency ---
+    # Stack into shape (num_runs, num_images, num_classes)
+    if all_run_predictions:
+        prediction_matrix = np.stack(all_run_predictions, axis=0)
+
+        # For each image, compute std dev of predicted class probabilities across runs
+        # Mean std dev across all images and classes gives the instability score
+        per_image_std = np.std(prediction_matrix, axis=0)  # (num_images, num_classes)
+        mean_instability = float(np.mean(per_image_std))
+
+        # Consistency score: 1 = perfectly consistent, 0 = maximally inconsistent
+        consistency_score = round(1.0 - mean_instability, 4)
+
+        print('\n=== OUTPUT CONSISTENCY SCORE: %.4f (instability: %.4f) ===' % (
+            consistency_score, mean_instability))
+
+        os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+        reliability_path = os.path.join(FLAGS.metrics_output_dir, 'reliability_score.txt')
+        with open(reliability_path, 'w') as f:
+            f.write('Run ID: %s\n' % FLAGS.run_id)
+            f.write('Reliability Metric: Output Consistency Score\n')
+            f.write('Consistency Score: %.4f\n' % consistency_score)
+            f.write('Mean Instability (avg std dev across images and classes): %.4f\n' % mean_instability)
+            f.write('Number of runs: %d\n' % FLAGS.eval_runs)
+            f.write('Number of test images evaluated: %d\n' % prediction_matrix.shape[1])
+    # --- End Reliability Score ---
 
     ### ORIGINAL AVERAGE PRINTING AND CSV LOGGING FOR F1 SCORE - COMMENTED OUT TO PREVENT DUPLICATE LOGGING DURING MULTIPLE RUNS, BUT CAN BE RE-ENABLED IF DESIRED. ###
     # print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
