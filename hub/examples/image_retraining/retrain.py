@@ -1197,6 +1197,7 @@ if __name__ == '__main__':
     # if os.path.isfile(csv_path):
     #     os.remove(csv_path)
 
+
     # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
     all_f1, all_precision, all_recall = [], [], []
 
@@ -1228,10 +1229,11 @@ if __name__ == '__main__':
             all_f1.append(f1)
             all_precision.append(precision)
             all_recall.append(recall)
-
+            
     avg_f1 = round(float(np.mean(all_f1)), 4)
     avg_precision = round(float(np.mean(all_precision)), 4)
     avg_recall = round(float(np.mean(all_recall)), 4)
+
 
     ### ORIGINAL AVERAGE PRINTING AND CSV LOGGING FOR F1 SCORE - COMMENTED OUT TO PREVENT DUPLICATE LOGGING DURING MULTIPLE RUNS, BUT CAN BE RE-ENABLED IF DESIRED. ###
     # print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
