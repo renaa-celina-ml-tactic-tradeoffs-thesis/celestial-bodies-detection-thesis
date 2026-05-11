@@ -702,38 +702,19 @@ def variable_summaries(var):
         tf.compat.v1.summary.scalar('min', tf.reduce_min(input_tensor=var))
         tf.compat.v1.summary.histogram('histogram', var)
 
-
+# Updated to include is_training placeholder for dropout
 def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
-    """Adds a new softmax and fully-connected layer for training.
-
-    We need to retrain the top layer to identify our new classes, so this function
-    adds the right operations to the graph, along with some variables to hold the
-    weights, and then sets up all the gradients for the backward pass.
-
-    The set up for the softmax and fully-connected layers is based on:
-    https://tensorflow.org/versions/master/tutorials/mnist/beginners/index.html
-
-    Args:
-      class_count: Integer of how many categories of things we're trying to
-      recognize.
-      final_tensor_name: Name string for the new final node that produces results.
-      bottleneck_tensor: The output of the main CNN graph.
-
-    Returns:
-      The tensors for the training and cross entropy results, and tensors for the
-      bottleneck input and ground truth input.
-    """
     with tf.compat.v1.name_scope('input'):
         bottleneck_input = tf.compat.v1.placeholder_with_default(
             bottleneck_tensor, shape=[None, BOTTLENECK_TENSOR_SIZE],
             name='BottleneckInputPlaceholder')
-
         ground_truth_input = tf.compat.v1.placeholder(tf.float32,
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # Organizing the following ops as `final_training_ops` so they're easier
-    # to see in TensorBoard
+    # Add a training phase flag so dropout knows when to be active
+    is_training = tf.compat.v1.placeholder_with_default(False, shape=[], name='is_training')
+
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
@@ -741,12 +722,19 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 [BOTTLENECK_TENSOR_SIZE, class_count], stddev=0.001), name='final_weights')
             variable_summaries(layer_weights)
         with tf.compat.v1.name_scope('biases'):
-            layer_biases = tf.Variable(
-                tf.zeros([class_count]), name='final_biases')
+            layer_biases = tf.Variable(tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
             logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
             tf.compat.v1.summary.histogram('pre_activations', logits)
+
+        # Apply dropout to the logits, active only during training
+        with tf.compat.v1.name_scope('dropout'):
+            logits = tf.cond(
+                is_training,
+                lambda: tf.nn.dropout(logits, rate=0.5),
+                lambda: logits
+            )
 
     final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
     tf.compat.v1.summary.histogram('activations', final_tensor)
@@ -763,7 +751,7 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             cross_entropy_mean)
 
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
-            final_tensor)
+            final_tensor, is_training)  # <-- is_training added to return
 
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
@@ -829,11 +817,12 @@ def main(_):
         cache_bottlenecks(sess, image_lists, FLAGS.image_dir, FLAGS.bottleneck_dir,
                           jpeg_data_tensor, bottleneck_tensor)
 
-    # Add the new layer that we'll be training.
+     # Add the new layer that we'll be training.
+    # Unpack is_training from the returned tuple
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-     final_tensor) = add_final_training_ops(len(image_lists.keys()),
-                                            FLAGS.final_tensor_name,
-                                            bottleneck_tensor)
+    final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
+                                                        FLAGS.final_tensor_name,
+                                                        bottleneck_tensor)
 
     # Create the operations we need to evaluate the accuracy of our new layer.
     evaluation_step, prediction = add_evaluation_step(
@@ -870,8 +859,9 @@ def main(_):
         # Feed the bottlenecks and ground truth into the graph, and run a training
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
-                                    feed_dict={bottleneck_input: train_bottlenecks,
-                                               ground_truth_input: train_ground_truth})
+                            feed_dict={bottleneck_input: train_bottlenecks,
+                                       ground_truth_input: train_ground_truth,
+                                       is_training: True})  # <-- dropout active
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -880,7 +870,8 @@ def main(_):
             train_accuracy, cross_entropy_value = sess.run(
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
-                           ground_truth_input: train_ground_truth})
+                        ground_truth_input: train_ground_truth,
+                        is_training: True})  # <-- dropout active
             print('%s: Step %d: Train accuracy = %.1f%%' % (datetime.now(), i,
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
