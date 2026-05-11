@@ -737,8 +737,10 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
-            layer_weights = tf.Variable(tf.random.truncated_normal(
-                [BOTTLENECK_TENSOR_SIZE, class_count], stddev=0.001), name='final_weights')
+            layer_weights = tf.Variable(
+                tf.initializers.glorot_uniform(seed=42)(
+                    shape=[BOTTLENECK_TENSOR_SIZE, class_count]),
+                name='final_weights')
             variable_summaries(layer_weights)
         with tf.compat.v1.name_scope('biases'):
             layer_biases = tf.Variable(
