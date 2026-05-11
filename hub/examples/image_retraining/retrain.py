@@ -181,26 +181,14 @@ if __name__ == '__main__':
 
     FLAGS, unparsed = parser.parse_known_args()
 
-    tf.compat.v1.disable_eager_execution()
+    # # Reset the f1 results CSV at the start of each run
+    # os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
+    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
+    # if os.path.isfile(csv_path):
+    #     os.remove(csv_path)
 
-    # --- Evaluator: reliability score before training ---
-    report = validate_directory(FLAGS.image_dir)
-    print(f"Reliability Score: {report['score']:.3f} "
-          f"({report['passed']}/{report['total']} valid images)")
-    if report['failed']:
-        print("Failed files (first 5):", report['failed'][:5])
 
-    os.makedirs(FLAGS.metrics_output_dir, exist_ok=True)
-    reliability_path = os.path.join(FLAGS.metrics_output_dir, "reliability_score.txt")
-    with open(reliability_path, "w") as f:
-        f.write(f"Reliability Score: {report['score']:.3f} "
-                f"({report['passed']}/{report['total']} valid images)\n")
-        if report['failed']:
-            f.write("Failed files:\n")
-            for path in report['failed']:
-                f.write(path + "\n")
-
-    # --- Run multiple training + evaluation cycles ---
+    # Run multiple training + evaluation cycles to get an average F1 score, since it can vary from run to run.
     all_f1, all_precision, all_recall = [], [], []
 
     for run_num in range(1, FLAGS.eval_runs + 1):
@@ -227,8 +215,26 @@ if __name__ == '__main__':
             all_f1.append(f1)
             all_precision.append(precision)
             all_recall.append(recall)
-
+            
     avg_f1 = round(float(np.mean(all_f1)), 4)
     avg_precision = round(float(np.mean(all_precision)), 4)
     avg_recall = round(float(np.mean(all_recall)), 4)
-    
+
+
+    ### ORIGINAL AVERAGE PRINTING AND CSV LOGGING FOR F1 SCORE - COMMENTED OUT TO PREVENT DUPLICATE LOGGING DURING MULTIPLE RUNS, BUT CAN BE RE-ENABLED IF DESIRED. ###
+    # print('\n=== AVERAGE over %d runs | F1: %.4f | Precision: %.4f | Recall: %.4f ===' % (
+    #     FLAGS.eval_runs, avg_f1, avg_precision, avg_recall))
+
+    # csv_path = os.path.join(FLAGS.metrics_output_dir, 'f1_results.csv')
+    # with open(csv_path, 'a', newline='') as csvfile:
+    #     writer = csv.DictWriter(csvfile, fieldnames=[
+    #         'timestamp', 'run_id', 'run_number',
+    #         'f1_weighted', 'precision_weighted', 'recall_weighted'])
+    #     writer.writerow({
+    #         'timestamp': datetime.now().isoformat(timespec='seconds'),
+    #         'run_id': FLAGS.run_id + '_AVG',
+    #         'run_number': 0,
+    #         'f1_weighted': avg_f1,
+    #         'precision_weighted': avg_precision,
+    #         'recall_weighted': avg_recall,
+    #     })
