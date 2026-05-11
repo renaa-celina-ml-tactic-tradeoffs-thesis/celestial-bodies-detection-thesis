@@ -712,8 +712,9 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # Add a training phase flag so dropout knows when to be active
     is_training = tf.compat.v1.placeholder_with_default(False, shape=[], name='is_training')
+    # Separate placeholder for dropout rate so it can be ramped in during training
+    dropout_rate = tf.compat.v1.placeholder_with_default(0.0, shape=[], name='dropout_rate')
 
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
@@ -725,11 +726,11 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             layer_biases = tf.Variable(tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            # Apply dropout to the bottleneck input before the weights, not to logits
+            # Dropout applied to bottleneck input, rate controlled by placeholder
             with tf.compat.v1.name_scope('dropout'):
                 bottleneck_dropped = tf.cond(
                     is_training,
-                    lambda: tf.nn.dropout(bottleneck_input, rate=0.2),
+                    lambda: tf.nn.dropout(bottleneck_input, rate=dropout_rate),
                     lambda: bottleneck_input
                 )
             logits = tf.matmul(bottleneck_dropped, layer_weights) + layer_biases
@@ -749,9 +750,9 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(
             cross_entropy_mean)
 
+    # dropout_rate added to return tuple
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
-            final_tensor, is_training)  # <-- is_training added to return
-
+            final_tensor, is_training, dropout_rate)
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
     """Inserts the operations we need to evaluate the accuracy of our results.
@@ -819,9 +820,9 @@ def main(_):
      # Add the new layer that we'll be training.
     # Unpack is_training from the returned tuple
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-    final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
-                                                        FLAGS.final_tensor_name,
-                                                        bottleneck_tensor)
+        final_tensor, is_training, dropout_rate) = add_final_training_ops(len(image_lists.keys()),
+                                                                    FLAGS.final_tensor_name,
+                                                                    bottleneck_tensor)
 
     # Create the operations we need to evaluate the accuracy of our new layer.
     evaluation_step, prediction = add_evaluation_step(
@@ -841,6 +842,8 @@ def main(_):
     # Run the training for as many cycles as requested on the command line.
     # Start timer before training loop
     start_time = time.perf_counter()
+    # First 25% of steps train without dropout, then ramp in at rate 0.2
+    warmup_steps = FLAGS.how_many_training_steps // 4
 
     for i in range(FLAGS.how_many_training_steps):
         # Get a batch of input bottleneck values, either calculated fresh every time
@@ -858,9 +861,10 @@ def main(_):
         # Feed the bottlenecks and ground truth into the graph, and run a training
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
-                            feed_dict={bottleneck_input: train_bottlenecks,
-                                       ground_truth_input: train_ground_truth,
-                                       is_training: True})  # <-- dropout active
+                    feed_dict={bottleneck_input: train_bottlenecks,
+                               ground_truth_input: train_ground_truth,
+                               is_training: True,
+                               dropout_rate: 0.2 if i >= warmup_steps else 0.0})  # <-- ramp in
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -870,7 +874,7 @@ def main(_):
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
                         ground_truth_input: train_ground_truth,
-                        is_training: False})  # <-- dropout OFF during eval
+                        is_training: False})  # <-- dropout off during eval, no dropout_rate needed
             print('%s: Step %d: Train accuracy = %.1f%%' % (datetime.now(), i,
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
