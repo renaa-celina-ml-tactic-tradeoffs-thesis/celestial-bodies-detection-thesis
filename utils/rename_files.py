@@ -1,3 +1,4 @@
+
 #! python3
 # rename_files.py - Will be used to rename all training data image files
 # that are being used for a TensorFlow Celestial Body image classifier
