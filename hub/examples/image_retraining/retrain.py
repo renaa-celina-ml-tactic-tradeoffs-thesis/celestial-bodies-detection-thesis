@@ -725,16 +725,15 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             layer_biases = tf.Variable(tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            # Apply dropout to the bottleneck input before the weights, not to logits
+            with tf.compat.v1.name_scope('dropout'):
+                bottleneck_dropped = tf.cond(
+                    is_training,
+                    lambda: tf.nn.dropout(bottleneck_input, rate=0.5),
+                    lambda: bottleneck_input
+                )
+            logits = tf.matmul(bottleneck_dropped, layer_weights) + layer_biases
             tf.compat.v1.summary.histogram('pre_activations', logits)
-
-        # Apply dropout to the logits, active only during training
-        with tf.compat.v1.name_scope('dropout'):
-            logits = tf.cond(
-                is_training,
-                lambda: tf.nn.dropout(logits, rate=0.5),
-                lambda: logits
-            )
 
     final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
     tf.compat.v1.summary.histogram('activations', final_tensor)
@@ -871,7 +870,7 @@ def main(_):
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
                         ground_truth_input: train_ground_truth,
-                        is_training: True})  # <-- dropout active
+                        is_training: False})  # <-- dropout OFF during eval
             print('%s: Step %d: Train accuracy = %.1f%%' % (datetime.now(), i,
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
