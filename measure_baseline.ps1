@@ -8,7 +8,7 @@
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $RUNS = 10 # Number of times to run the training process
-$RUN_ID = "baseline"
+$RUN_ID = "model-pruning"
 $TRAIN_DIR = Join-Path $ROOT "hub\examples\image_retraining" # Path to the retraining script, adjustable to your setup
 $MEASUREMENTS_DIR = Join-Path $ROOT "measurements"
 $LOGFILE = Join-Path $MEASUREMENTS_DIR "measurement_log.txt" # Log file to store training times and average
