@@ -727,7 +727,7 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             with tf.compat.v1.name_scope('dropout'):
                 bottleneck_dropped = tf.cond(
                     is_training,
-                    lambda: tf.nn.dropout(bottleneck_input, rate=0.5),
+                    lambda: tf.nn.dropout(bottleneck_input, rate=0.1),
                     lambda: bottleneck_input
                 )
             logits = tf.matmul(bottleneck_dropped, layer_weights) + layer_biases
