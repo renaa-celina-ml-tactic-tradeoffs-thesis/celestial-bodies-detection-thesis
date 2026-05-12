@@ -713,8 +713,6 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                                                       name='GroundTruthInput')
 
     is_training = tf.compat.v1.placeholder_with_default(False, shape=[], name='is_training')
-    # Separate placeholder for dropout rate so it can be ramped in during training
-    dropout_rate = tf.compat.v1.placeholder_with_default(0.0, shape=[], name='dropout_rate')
 
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
@@ -726,11 +724,10 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             layer_biases = tf.Variable(tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            # Dropout applied to bottleneck input, rate controlled by placeholder
             with tf.compat.v1.name_scope('dropout'):
                 bottleneck_dropped = tf.cond(
                     is_training,
-                    lambda: tf.nn.dropout(bottleneck_input, rate=dropout_rate),
+                    lambda: tf.nn.dropout(bottleneck_input, rate=0.5),
                     lambda: bottleneck_input
                 )
             logits = tf.matmul(bottleneck_dropped, layer_weights) + layer_biases
@@ -750,9 +747,8 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(
             cross_entropy_mean)
 
-    # dropout_rate added to return tuple
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
-            final_tensor, is_training, dropout_rate)
+            final_tensor, is_training)
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
     """Inserts the operations we need to evaluate the accuracy of our results.
@@ -820,9 +816,9 @@ def main(_):
      # Add the new layer that we'll be training.
     # Unpack is_training from the returned tuple
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-        final_tensor, is_training, dropout_rate) = add_final_training_ops(len(image_lists.keys()),
-                                                                    FLAGS.final_tensor_name,
-                                                                    bottleneck_tensor)
+     final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
+                                                         FLAGS.final_tensor_name,
+                                                         bottleneck_tensor)
 
     # Create the operations we need to evaluate the accuracy of our new layer.
     evaluation_step, prediction = add_evaluation_step(
@@ -863,8 +859,7 @@ def main(_):
         train_summary, _ = sess.run([merged, train_step],
                     feed_dict={bottleneck_input: train_bottlenecks,
                                ground_truth_input: train_ground_truth,
-                               is_training: True,
-                               dropout_rate: 0.2 if i >= warmup_steps else 0.0})  # <-- ramp in
+                               is_training: True})
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
