@@ -461,43 +461,30 @@ def cache_bottlenecks(sess, image_lists, image_dir, bottleneck_dir,
                     print(str(how_many_bottlenecks) +
                           ' bottleneck files created.')
 
-
+# Updated logic to allow for deterministic selection of images when step is provided, which is useful for consistent evaluation during training.
 def get_random_cached_bottlenecks(sess, image_lists, how_many, category,
                                   bottleneck_dir, image_dir, jpeg_data_tensor,
-                                  bottleneck_tensor):
-    """Retrieves bottleneck values for cached images.
-
-    If no distortions are being applied, this function can retrieve the cached
-    bottleneck values directly from disk for images. It picks a random set of
-    images from the specified category.
-
-    Args:
-      sess: Current TensorFlow Session.
-      image_lists: Dictionary of training images for each label.
-      how_many: If positive, a random sample of this size will be chosen.
-      If negative, all bottlenecks will be retrieved.
-      category: Name string of which set to pull from - training, testing, or
-      validation.
-      bottleneck_dir: Folder string holding cached files of bottleneck values.
-      image_dir: Root folder string of the subfolders containing the training
-      images.
-      jpeg_data_tensor: The layer to feed jpeg image data into.
-      bottleneck_tensor: The bottleneck output layer of the CNN graph.
-
-    Returns:
-      List of bottleneck arrays, their corresponding ground truths, and the
-      relevant filenames.
-    """
+                                  bottleneck_tensor, step=None):
     class_count = len(image_lists.keys())
     bottlenecks = []
     ground_truths = []
     filenames = []
+    label_names = list(image_lists.keys())
+
     if how_many >= 0:
-        # Retrieve a random sample of bottlenecks.
-        for unused_i in range(how_many):
-            label_index = random.randrange(class_count)
-            label_name = list(image_lists.keys())[label_index]
-            image_index = random.randrange(MAX_NUM_IMAGES_PER_CLASS + 1)
+        for offset in range(how_many):
+            if step is not None and category == 'training':
+                # Deterministic: derive label and image index from step + offset
+                combined_index = (step * how_many + offset)
+                label_index = combined_index % class_count
+                label_name = label_names[label_index]
+                category_list = image_lists[label_name][category]
+                image_index = combined_index % len(category_list)
+            else:
+                label_index = random.randrange(class_count)
+                label_name = label_names[label_index]
+                image_index = random.randrange(MAX_NUM_IMAGES_PER_CLASS + 1)
+
             image_name = get_image_path(image_lists, label_name, image_index,
                                         image_dir, category)
             bottleneck = get_or_create_bottleneck(sess, image_lists, label_name,
@@ -510,8 +497,8 @@ def get_random_cached_bottlenecks(sess, image_lists, how_many, category,
             ground_truths.append(ground_truth)
             filenames.append(image_name)
     else:
-        # Retrieve all bottlenecks.
-        for label_index, label_name in enumerate(image_lists.keys()):
+        # Retrieve all — unchanged
+        for label_index, label_name in enumerate(label_names):
             for image_index, image_name in enumerate(
                     image_lists[label_name][category]):
                 image_name = get_image_path(image_lists, label_name, image_index,
@@ -525,6 +512,7 @@ def get_random_cached_bottlenecks(sess, image_lists, how_many, category,
                 bottlenecks.append(bottleneck)
                 ground_truths.append(ground_truth)
                 filenames.append(image_name)
+
     return bottlenecks, ground_truths, filenames
 
 
@@ -737,8 +725,10 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
-            layer_weights = tf.Variable(tf.random.truncated_normal(
-                [BOTTLENECK_TENSOR_SIZE, class_count], stddev=0.001), name='final_weights')
+            layer_weights = tf.Variable(
+                tf.initializers.glorot_uniform(seed=42)(
+                    shape=[BOTTLENECK_TENSOR_SIZE, class_count]),
+                name='final_weights')
             variable_summaries(layer_weights)
         with tf.compat.v1.name_scope('biases'):
             layer_biases = tf.Variable(
@@ -863,10 +853,11 @@ def main(_):
                 FLAGS.image_dir, distorted_jpeg_data_tensor,
                 distorted_image_tensor, resized_image_tensor, bottleneck_tensor)
         else:
+            # Training batch call — add step=i
             train_bottlenecks, train_ground_truth, _ = get_random_cached_bottlenecks(
                 sess, image_lists, FLAGS.train_batch_size, 'training',
                 FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
-                bottleneck_tensor)
+                bottleneck_tensor, step=i)   # <-- added
         # Feed the bottlenecks and ground truth into the graph, and run a training
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
@@ -885,11 +876,12 @@ def main(_):
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
                                                        cross_entropy_value))
+            # Validation call — leave step=None (validation randomness is fine)
             validation_bottlenecks, validation_ground_truth, _ = (
                 get_random_cached_bottlenecks(
                     sess, image_lists, FLAGS.validation_batch_size, 'validation',
                     FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
-                    bottleneck_tensor))
+                    bottleneck_tensor))  # no step
             # Run a validation step and capture training summaries for TensorBoard
             # with the `merged` op.
             validation_summary, validation_accuracy = sess.run(
