@@ -745,9 +745,12 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            pre_activations = tf.matmul(
+                bottleneck_input,
+                layer_weights
+            ) + layer_biases
 
-            batch_norm = tf.compat.v1.layers.batch_normalization(
+            batch_norm = tf.keras.layers.BatchNormalization()(
                 pre_activations,
                 training=True
             )
