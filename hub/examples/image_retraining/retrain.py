@@ -770,11 +770,8 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):
-        # Global step counter used by the decay schedule
         global_step = tf.compat.v1.train.get_or_create_global_step()
 
-        # Exponential decay: starts at FLAGS.learning_rate (0.01), decays by
-        # factor 0.96 every 100 steps, giving ~0.0017 by step 4000
         decayed_learning_rate = tf.compat.v1.train.exponential_decay(
             learning_rate=FLAGS.learning_rate,
             global_step=global_step,
@@ -784,14 +781,11 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
 
         tf.compat.v1.summary.scalar('learning_rate', decayed_learning_rate)
 
-        train_step = tf.compat.v1.train.GradientDescentOptimizer(
-            decayed_learning_rate).minimize(cross_entropy_mean, global_step=global_step)
-
-        update_ops = tf.compat.v1.get_collection(
-            tf.compat.v1.GraphKeys.UPDATE_OPS)
+        update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
 
         with tf.control_dependencies(update_ops):
-            train_step = optimizer.minimize(cross_entropy_mean)
+            train_step = tf.compat.v1.train.GradientDescentOptimizer(
+                decayed_learning_rate).minimize(cross_entropy_mean, global_step=global_step)
 
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor)
