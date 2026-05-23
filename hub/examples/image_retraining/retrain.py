@@ -723,6 +723,9 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
       The tensors for the training and cross entropy results, and tensors for the
       bottleneck input and ground truth input.
     """
+    is_training_t = sess.graph.get_tensor_by_name('is_training:0')
+    predictions = sess.run(output_tensor, {input_tensor: img_data, is_training_t: False})
+
     with tf.compat.v1.name_scope('input'):
         bottleneck_input = tf.compat.v1.placeholder_with_default(
             bottleneck_tensor, shape=[None, BOTTLENECK_TENSOR_SIZE],
@@ -745,22 +748,16 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            pre_activations = tf.matmul(
-                bottleneck_input,
-                layer_weights
-            ) + layer_biases
+            pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
-            batch_norm = tf.keras.layers.BatchNormalization()(
-                pre_activations,
-                training=True
+            bn_layer = tf.keras.layers.BatchNormalization(
+                momentum=0.99, epsilon=1e-3, name='final_bn'
             )
+            logits = bn_layer(pre_activations, training=is_training)
 
-            logits = tf.nn.relu(batch_norm)
+            tf.compat.v1.summary.histogram('logits', logits)
 
-            tf.compat.v1.summary.histogram('pre_activations', logits)
-
-    final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
-    tf.compat.v1.summary.histogram('activations', final_tensor)
+        final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
 
     with tf.compat.v1.name_scope('cross_entropy'):
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
@@ -888,7 +885,7 @@ def main(_):
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
                                     feed_dict={bottleneck_input: train_bottlenecks,
-                                               ground_truth_input: train_ground_truth})
+                                               ground_truth_input: train_ground_truth, is_training: True})
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -912,7 +909,8 @@ def main(_):
             validation_summary, validation_accuracy = sess.run(
                 [merged, evaluation_step],
                 feed_dict={bottleneck_input: validation_bottlenecks,
-                           ground_truth_input: validation_ground_truth})
+                           ground_truth_input: validation_ground_truth, 
+                           is_training: False})
             validation_writer.add_summary(validation_summary, i)
             print('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                   (datetime.now(), i, validation_accuracy * 100,
