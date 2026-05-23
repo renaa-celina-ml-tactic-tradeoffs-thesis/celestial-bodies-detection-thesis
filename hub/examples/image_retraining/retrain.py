@@ -959,7 +959,7 @@ def main(_):
 
     # Write out the trained graph and labels with the weights stored as constants.
     output_graph_def = convert_variables_to_constants(
-        sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
+        sess, sess.graph.as_graph_def(), [FLAGS.final_tensor_name])   
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
         f.write(output_graph_def.SerializeToString())
     with gfile.FastGFile(FLAGS.output_labels, 'w') as f:
@@ -967,57 +967,70 @@ def main(_):
 
 # Class to calculate the F1 score on a test set after training completes, and log the results to a CSV file.
 def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
-                             run_number, metrics_output_dir):
+                           run_number, metrics_output_dir):
+
+    # Try to grab is_training if it exists in the imported/frozen graph
     try:
         is_training_t = sess.graph.get_tensor_by_name('is_training:0')
     except KeyError:
         is_training_t = None
+
     label_map = {lbl.lower().strip(): i for i, lbl in enumerate(labels_list)}
-    # Gather all test samples and their true labels based on the folder structure.
+
+    # Gather all test samples and their true labels based on folder structure
     samples = []
     for class_folder in sorted(os.listdir(test_dir)):
-        feed = {input_tensor: img_data}
-        if is_training_t is not None:
-            feed[is_training_t] = False
-
-        predictions = sess.run(output_tensor, feed)
         folder_path = os.path.join(test_dir, class_folder)
         if not os.path.isdir(folder_path):
             continue
+
         class_key = class_folder.lower()
-        if class_key not in label_map: 
+        if class_key not in label_map:
             print('WARNING: Test folder "%s" not found in labels, skipping.' % class_folder)
             continue
+
         label_idx = label_map[class_key]
         for fname in sorted(os.listdir(folder_path)):
             if fname.lower().endswith(('.jpg', '.jpeg', '.png')):
                 samples.append((os.path.join(folder_path, fname), label_idx))
 
     print('F1 eval: %d test images across %d classes.' % (len(samples), len(label_map)))
-    # Run inference on each test image and collect predictions and true labels.
-    input_tensor = sess.graph.get_tensor_by_name('DecodeJpeg/contents:0') # The input tensor for raw image data
-    output_tensor = sess.graph.get_tensor_by_name('final_result:0') # The output tensor for predicted probabilities
 
-    # Loop through test samples, run inference, and collect true labels and predictions.
+    # Tensors for inference
+    input_tensor = sess.graph.get_tensor_by_name('DecodeJpeg/contents:0')
+    output_tensor = sess.graph.get_tensor_by_name('final_result:0')
+
+    # Run inference on each test image and collect predictions and true labels
     y_true, y_pred = [], []
     for img_path, true_idx in samples:
         try:
             img_data = gfile.FastGFile(img_path, 'rb').read()
-            predictions = sess.run(output_tensor, {input_tensor: img_data})
+
+            feed = {input_tensor: img_data}
+            if is_training_t is not None:
+                feed[is_training_t] = False  # <-- forces BN inference mode
+
+            probs = sess.run(output_tensor, feed)
+
             y_true.append(true_idx)
-            y_pred.append(int(np.argmax(predictions)))
+            y_pred.append(int(np.argmax(probs)))
         except Exception as e:
             print('WARNING: Could not process %s: %s' % (img_path, str(e)))
 
-    # Calculating the F1 score, precision, and recall using the sckit-learn metrics functions. 
+    # Metrics
     f1 = round(f1_score(y_true, y_pred, average='weighted', zero_division=0), 4)
     precision = round(precision_score(y_true, y_pred, average='weighted', zero_division=0), 4)
     recall = round(recall_score(y_true, y_pred, average='weighted', zero_division=0), 4)
 
     print('Run %d | F1: %.4f | Precision: %.4f | Recall: %.4f' % (run_number, f1, precision, recall))
-    print(classification_report(y_true, y_pred, labels=list(range(len(labels_list))), target_names=labels_list, zero_division=0))
- 
-    # Writes to the f1_results.csv file
+    print(classification_report(
+        y_true, y_pred,
+        labels=list(range(len(labels_list))),
+        target_names=labels_list,
+        zero_division=0
+    ))
+
+    # Write CSV
     os.makedirs(metrics_output_dir, exist_ok=True)
     csv_path = os.path.join(metrics_output_dir, 'f1_results.csv')
     file_exists = os.path.isfile(csv_path)
@@ -1035,6 +1048,7 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
             'precision_weighted': precision,
             'recall_weighted': recall,
         })
+
     return f1, precision, recall
 
 if __name__ == '__main__':
