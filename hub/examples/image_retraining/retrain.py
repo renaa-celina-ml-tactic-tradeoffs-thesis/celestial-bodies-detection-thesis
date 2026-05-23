@@ -725,102 +725,62 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     """
     with tf.compat.v1.name_scope('input'):
         bottleneck_input = tf.compat.v1.placeholder_with_default(
-            bottleneck_tensor,
-            shape=[None, BOTTLENECK_TENSOR_SIZE],
-            name='BottleneckInputPlaceholder'
-        )
-        ground_truth_input = tf.compat.v1.placeholder(
-            tf.float32, [None, class_count], name='GroundTruthInput'
-        )
+            bottleneck_tensor, shape=[None, BOTTLENECK_TENSOR_SIZE],
+            name='BottleneckInputPlaceholder')
 
-        # BN control flag (default False so inference works if you forget to feed it)
-        is_training = tf.compat.v1.placeholder_with_default(
-            False, shape=(), name='is_training'
-        )
+        ground_truth_input = tf.compat.v1.placeholder(tf.float32,
+                                                      [None, class_count],
+                                                      name='GroundTruthInput')
 
+    # Organizing the following ops as `final_training_ops` so they're easier
+    # to see in TensorBoard
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
-            layer_weights = tf.Variable(
-                tf.random.truncated_normal([BOTTLENECK_TENSOR_SIZE, class_count], stddev=0.001),
-                name='final_weights'
-            )
+            layer_weights = tf.Variable(tf.random.truncated_normal(
+                [BOTTLENECK_TENSOR_SIZE, class_count], stddev=0.001), name='final_weights')
             variable_summaries(layer_weights)
-
         with tf.compat.v1.name_scope('biases'):
-            layer_biases = tf.Variable(tf.zeros([class_count]), name='final_biases')
+            layer_biases = tf.Variable(
+                tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
-
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            pre_activations = tf.matmul(
+                bottleneck_input,
+                layer_weights
+            ) + layer_biases
 
-            # BatchNorm ONLY (no ReLU, no extra layers)
-            # Create moving stats variables (non-trainable)
-            with tf.compat.v1.variable_scope('final_bn', reuse=tf.compat.v1.AUTO_REUSE):
-                moving_mean = tf.compat.v1.get_variable(
-                    'moving_mean', shape=[class_count],
-                    initializer=tf.zeros_initializer(), trainable=False
-                )
-                moving_var = tf.compat.v1.get_variable(
-                    'moving_variance', shape=[class_count],
-                    initializer=tf.ones_initializer(), trainable=False
-                )
-                beta = tf.compat.v1.get_variable(
-                    'beta', shape=[class_count],
-                    initializer=tf.zeros_initializer(), trainable=True
-                )
-                gamma = tf.compat.v1.get_variable(
-                    'gamma', shape=[class_count],
-                    initializer=tf.ones_initializer(), trainable=True
-                )
+            batch_norm = tf.keras.layers.BatchNormalization()(
+                pre_activations,
+                training=True
+            )
 
-            def bn_train():
-                y, batch_mean, batch_var = tf.nn.fused_batch_norm(
-                    logits, scale=gamma, offset=beta, epsilon=1e-3, is_training=True
-                )
-                decay = 0.99
-                update_mean = tf.compat.v1.assign(moving_mean, moving_mean * decay + batch_mean * (1.0 - decay))
-                update_var = tf.compat.v1.assign(moving_var, moving_var * decay + batch_var * (1.0 - decay))
-                with tf.control_dependencies([update_mean, update_var]):
-                    return tf.identity(y)
+            logits = tf.nn.relu(batch_norm)
 
-            def bn_infer():
-                y, _, _ = tf.nn.fused_batch_norm(
-                    logits, scale=gamma, offset=beta,
-                    mean=moving_mean, variance=moving_var,
-                    epsilon=1e-3, is_training=False
-                )
-                return y
-
-            logits = tf.cond(is_training, bn_train, bn_infer)
-
-            tf.compat.v1.summary.histogram('logits', logits)
+            tf.compat.v1.summary.histogram('pre_activations', logits)
 
     final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
     tf.compat.v1.summary.histogram('activations', final_tensor)
 
     with tf.compat.v1.name_scope('cross_entropy'):
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
-            labels=tf.stop_gradient(ground_truth_input),
-            logits=logits
-        )
-        cross_entropy_mean = tf.reduce_mean(input_tensor=cross_entropy)
+            labels=tf.stop_gradient(ground_truth_input), logits=logits)
+        with tf.compat.v1.name_scope('total'):
+            cross_entropy_mean = tf.reduce_mean(input_tensor=cross_entropy)
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):
-        optimizer = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate)
+        optimizer = tf.compat.v1.train.GradientDescentOptimizer(
+            FLAGS.learning_rate)
 
-        # IMPORTANT: ensure BN moving-mean/var update ops run during training
-        update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
+        update_ops = tf.compat.v1.get_collection(
+            tf.compat.v1.GraphKeys.UPDATE_OPS)
+
         with tf.control_dependencies(update_ops):
             train_step = optimizer.minimize(cross_entropy_mean)
 
-    # Return is_training too so callers can feed it
-    return (
-        train_step, cross_entropy_mean,
-        bottleneck_input, ground_truth_input,
-        final_tensor, is_training
-    )
+    return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
+            final_tensor)
 
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
@@ -888,7 +848,7 @@ def main(_):
 
     # Add the new layer that we'll be training.
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-     final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
+     final_tensor) = add_final_training_ops(len(image_lists.keys()),
                                             FLAGS.final_tensor_name,
                                             bottleneck_tensor)
 
@@ -928,8 +888,7 @@ def main(_):
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
                                     feed_dict={bottleneck_input: train_bottlenecks,
-                                               ground_truth_input: train_ground_truth, 
-                                               is_training: True})
+                                               ground_truth_input: train_ground_truth})
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -953,8 +912,7 @@ def main(_):
             validation_summary, validation_accuracy = sess.run(
                 [merged, evaluation_step],
                 feed_dict={bottleneck_input: validation_bottlenecks,
-                           ground_truth_input: validation_ground_truth, 
-                           is_training: False})
+                           ground_truth_input: validation_ground_truth})
             validation_writer.add_summary(validation_summary, i)
             print('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                   (datetime.now(), i, validation_accuracy * 100,
@@ -979,8 +937,7 @@ def main(_):
     test_accuracy, predictions = sess.run(
         [evaluation_step, prediction],
         feed_dict={bottleneck_input: test_bottlenecks,
-                   ground_truth_input: test_ground_truth,
-                   is_training: False})
+                   ground_truth_input: test_ground_truth})
     print('Final test accuracy = %.1f%% (N=%d)' % (
         test_accuracy * 100, len(test_bottlenecks)))
 
@@ -993,7 +950,7 @@ def main(_):
 
     # Write out the trained graph and labels with the weights stored as constants.
     output_graph_def = convert_variables_to_constants(
-        sess, sess.graph.as_graph_def(), [FLAGS.final_tensor_name])   
+        sess, graph.as_graph_def(), [FLAGS.final_tensor_name])
     with gfile.FastGFile(FLAGS.output_graph, 'wb') as f:
         f.write(output_graph_def.SerializeToString())
     with gfile.FastGFile(FLAGS.output_labels, 'w') as f:
@@ -1001,70 +958,49 @@ def main(_):
 
 # Class to calculate the F1 score on a test set after training completes, and log the results to a CSV file.
 def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
-                           run_number, metrics_output_dir):
-
-    # Try to grab is_training if it exists in the imported/frozen graph
-    try:
-        is_training_t = sess.graph.get_tensor_by_name('is_training:0')
-    except KeyError:
-        is_training_t = None
+                             run_number, metrics_output_dir):
 
     label_map = {lbl.lower().strip(): i for i, lbl in enumerate(labels_list)}
-
-    # Gather all test samples and their true labels based on folder structure
+    # Gather all test samples and their true labels based on the folder structure.
     samples = []
     for class_folder in sorted(os.listdir(test_dir)):
         folder_path = os.path.join(test_dir, class_folder)
         if not os.path.isdir(folder_path):
             continue
-
         class_key = class_folder.lower()
-        if class_key not in label_map:
+        if class_key not in label_map: 
             print('WARNING: Test folder "%s" not found in labels, skipping.' % class_folder)
             continue
-
         label_idx = label_map[class_key]
         for fname in sorted(os.listdir(folder_path)):
             if fname.lower().endswith(('.jpg', '.jpeg', '.png')):
                 samples.append((os.path.join(folder_path, fname), label_idx))
 
     print('F1 eval: %d test images across %d classes.' % (len(samples), len(label_map)))
+    # Run inference on each test image and collect predictions and true labels.
+    input_tensor = sess.graph.get_tensor_by_name('DecodeJpeg/contents:0') # The input tensor for raw image data
+    output_tensor = sess.graph.get_tensor_by_name('final_result:0') # The output tensor for predicted probabilities
 
-    # Tensors for inference
-    input_tensor = sess.graph.get_tensor_by_name('DecodeJpeg/contents:0')
-    output_tensor = sess.graph.get_tensor_by_name('final_result:0')
-
-    # Run inference on each test image and collect predictions and true labels
+    # Loop through test samples, run inference, and collect true labels and predictions.
     y_true, y_pred = [], []
     for img_path, true_idx in samples:
         try:
             img_data = gfile.FastGFile(img_path, 'rb').read()
-
-            feed = {input_tensor: img_data}
-            if is_training_t is not None:
-                feed[is_training_t] = False  # <-- forces BN inference mode
-
-            probs = sess.run(output_tensor, feed)
-
+            predictions = sess.run(output_tensor, {input_tensor: img_data})
             y_true.append(true_idx)
-            y_pred.append(int(np.argmax(probs)))
+            y_pred.append(int(np.argmax(predictions)))
         except Exception as e:
             print('WARNING: Could not process %s: %s' % (img_path, str(e)))
 
-    # Metrics
+    # Calculating the F1 score, precision, and recall using the sckit-learn metrics functions. 
     f1 = round(f1_score(y_true, y_pred, average='weighted', zero_division=0), 4)
     precision = round(precision_score(y_true, y_pred, average='weighted', zero_division=0), 4)
     recall = round(recall_score(y_true, y_pred, average='weighted', zero_division=0), 4)
 
     print('Run %d | F1: %.4f | Precision: %.4f | Recall: %.4f' % (run_number, f1, precision, recall))
-    print(classification_report(
-        y_true, y_pred,
-        labels=list(range(len(labels_list))),
-        target_names=labels_list,
-        zero_division=0
-    ))
-
-    # Write CSV
+    print(classification_report(y_true, y_pred, labels=list(range(len(labels_list))), target_names=labels_list, zero_division=0))
+ 
+    # Writes to the f1_results.csv file
     os.makedirs(metrics_output_dir, exist_ok=True)
     csv_path = os.path.join(metrics_output_dir, 'f1_results.csv')
     file_exists = os.path.isfile(csv_path)
@@ -1082,7 +1018,6 @@ def f1_test_set_evaluation(sess, labels_list, test_dir, run_id,
             'precision_weighted': precision,
             'recall_weighted': recall,
         })
-
     return f1, precision, recall
 
 if __name__ == '__main__':
