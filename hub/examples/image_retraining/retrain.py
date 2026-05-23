@@ -745,7 +745,18 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            pre_activations = tf.matmul(
+                bottleneck_input,
+                layer_weights
+            ) + layer_biases
+
+            batch_norm = tf.keras.layers.BatchNormalization()(
+                pre_activations,
+                training=True
+            )
+
+            logits = tf.nn.relu(batch_norm)
+
             tf.compat.v1.summary.histogram('pre_activations', logits)
 
     final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
@@ -759,19 +770,14 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):
-        global_step = tf.compat.v1.train.get_or_create_global_step()
+        optimizer = tf.compat.v1.train.GradientDescentOptimizer(
+            FLAGS.learning_rate)
 
-        decayed_learning_rate = tf.compat.v1.train.exponential_decay(
-            learning_rate=FLAGS.learning_rate,
-            global_step=global_step,
-            decay_steps=100,
-            decay_rate=0.96,
-            staircase=True)
+        update_ops = tf.compat.v1.get_collection(
+            tf.compat.v1.GraphKeys.UPDATE_OPS)
 
-        tf.compat.v1.summary.scalar('learning_rate', decayed_learning_rate)
-
-        train_step = tf.compat.v1.train.GradientDescentOptimizer(
-        decayed_learning_rate).minimize(cross_entropy_mean, global_step=global_step)
+        with tf.control_dependencies(update_ops):
+            train_step = optimizer.minimize(cross_entropy_mean)
 
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor)
