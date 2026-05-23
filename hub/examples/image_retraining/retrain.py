@@ -727,13 +727,13 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         bottleneck_input = tf.compat.v1.placeholder_with_default(
             bottleneck_tensor, shape=[None, BOTTLENECK_TENSOR_SIZE],
             name='BottleneckInputPlaceholder')
-
         ground_truth_input = tf.compat.v1.placeholder(tf.float32,
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # Organizing the following ops as `final_training_ops` so they're easier
-    # to see in TensorBoard
+    # boolean placeholder to switch batch norm between training mode (minibatch stats) and eval mode (running averages).
+    is_training = tf.compat.v1.placeholder_with_default(False, shape=(), name='is_training')
+
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
@@ -752,10 +752,11 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
 
             batch_norm = tf.keras.layers.BatchNormalization()(
                 pre_activations,
-                training=True
+                training=is_training
             )
-
-            logits = tf.nn.relu(batch_norm)
+            # softmax_cross_entropy_with_logits expects raw (unbounded) values;
+            # applying ReLU first zeros out negative values -> corrupts gradient signal during training
+            logits = batch_norm
 
             tf.compat.v1.summary.histogram('pre_activations', logits)
 
@@ -770,17 +771,14 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):
-        optimizer = tf.compat.v1.train.GradientDescentOptimizer(
-            FLAGS.learning_rate)
-
-        update_ops = tf.compat.v1.get_collection(
-            tf.compat.v1.GraphKeys.UPDATE_OPS)
-
+        optimizer = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate)
+        update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(update_ops):
             train_step = optimizer.minimize(cross_entropy_mean)
 
+    # Return is_training so callers can set it correctly in feed_dict
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
-            final_tensor)
+            final_tensor, is_training)
 
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
@@ -848,7 +846,7 @@ def main(_):
 
     # Add the new layer that we'll be training.
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-     final_tensor) = add_final_training_ops(len(image_lists.keys()),
+     final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
                                             FLAGS.final_tensor_name,
                                             bottleneck_tensor)
 
@@ -888,7 +886,8 @@ def main(_):
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
                                     feed_dict={bottleneck_input: train_bottlenecks,
-                                               ground_truth_input: train_ground_truth})
+                                               ground_truth_input: train_ground_truth,
+                                               is_training: True}) # pass is_training=True so BN uses minibatch stats
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -897,7 +896,8 @@ def main(_):
             train_accuracy, cross_entropy_value = sess.run(
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
-                           ground_truth_input: train_ground_truth})
+                           ground_truth_input: train_ground_truth,
+                           is_training: False}) # omit is_training, BN uses its learned running averages instead
             print('%s: Step %d: Train accuracy = %.1f%%' % (datetime.now(), i,
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
