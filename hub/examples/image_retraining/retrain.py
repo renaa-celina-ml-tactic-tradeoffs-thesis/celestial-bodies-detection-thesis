@@ -755,13 +755,44 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
             # BatchNorm ONLY (no ReLU, no extra layers)
-            logits = tf.compat.v1.layers.batch_normalization(
-                logits,
-                momentum=0.99,
-                epsilon=1e-3,
-                training=is_training,
-                name='final_bn'
-            )
+            # Create moving stats variables (non-trainable)
+            with tf.compat.v1.variable_scope('final_bn', reuse=tf.compat.v1.AUTO_REUSE):
+                moving_mean = tf.compat.v1.get_variable(
+                    'moving_mean', shape=[class_count],
+                    initializer=tf.zeros_initializer(), trainable=False
+                )
+                moving_var = tf.compat.v1.get_variable(
+                    'moving_variance', shape=[class_count],
+                    initializer=tf.ones_initializer(), trainable=False
+                )
+                beta = tf.compat.v1.get_variable(
+                    'beta', shape=[class_count],
+                    initializer=tf.zeros_initializer(), trainable=True
+                )
+                gamma = tf.compat.v1.get_variable(
+                    'gamma', shape=[class_count],
+                    initializer=tf.ones_initializer(), trainable=True
+                )
+
+            def bn_train():
+                y, batch_mean, batch_var = tf.nn.fused_batch_norm(
+                    logits, scale=gamma, offset=beta, epsilon=1e-3, is_training=True
+                )
+                decay = 0.99
+                update_mean = tf.compat.v1.assign(moving_mean, moving_mean * decay + batch_mean * (1.0 - decay))
+                update_var = tf.compat.v1.assign(moving_var, moving_var * decay + batch_var * (1.0 - decay))
+                with tf.control_dependencies([update_mean, update_var]):
+                    return tf.identity(y)
+
+            def bn_infer():
+                y, _, _ = tf.nn.fused_batch_norm(
+                    logits, scale=gamma, offset=beta,
+                    mean=moving_mean, variance=moving_var,
+                    epsilon=1e-3, is_training=False
+                )
+                return y
+
+            logits = tf.cond(is_training, bn_train, bn_infer)
 
             tf.compat.v1.summary.histogram('logits', logits)
 
