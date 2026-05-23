@@ -755,10 +755,13 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
             # BatchNorm ONLY (no ReLU, no extra layers)
-            bn_layer = tf.keras.layers.BatchNormalization(
-                momentum=0.99, epsilon=1e-3, name='final_bn'
+            logits = tf.compat.v1.layers.batch_normalization(
+                logits,
+                momentum=0.99,
+                epsilon=1e-3,
+                training=is_training,
+                name='final_bn'
             )
-            logits = bn_layer(logits, training=is_training)
 
             tf.compat.v1.summary.histogram('logits', logits)
 
