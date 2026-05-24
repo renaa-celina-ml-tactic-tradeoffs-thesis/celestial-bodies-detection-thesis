@@ -753,20 +753,18 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             with tf.compat.v1.name_scope('Wx_plus_b'):
                 pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
-                # --- Batch Normalization via core TF ops (Keras-version-independent) ---
-                bn_gamma    = tf.Variable(tf.ones([class_count]),  name='bn_gamma',    trainable=True)
-                bn_beta     = tf.Variable(tf.zeros([class_count]), name='bn_beta',     trainable=True)
-                bn_mov_mean = tf.Variable(tf.zeros([class_count]), name='bn_mov_mean', trainable=False)
-                bn_mov_var  = tf.Variable(tf.ones([class_count]),  name='bn_mov_var',  trainable=False)
+                # Use get_variable (TF1 ref-variables) instead of tf.Variable (TF2 ResourceVariables)
+                # so convert_variables_to_constants can freeze them into the .pb correctly
+                bn_gamma    = tf.compat.v1.get_variable('bn_gamma',    initializer=tf.ones([class_count]),  trainable=True)
+                bn_beta     = tf.compat.v1.get_variable('bn_beta',     initializer=tf.zeros([class_count]), trainable=True)
+                bn_mov_mean = tf.compat.v1.get_variable('bn_mov_mean', initializer=tf.zeros([class_count]), trainable=False)
+                bn_mov_var  = tf.compat.v1.get_variable('bn_mov_var',  initializer=tf.ones([class_count]),  trainable=False)
 
                 epsilon = 1e-5
                 decay   = 0.99
 
-                # Compute per-batch statistics
                 batch_mean, batch_var = tf.nn.moments(pre_activations, axes=[0])
 
-                # Enqueue running-average updates so the optimizer picks them up
-                # via the existing tf.control_dependencies(update_ops) block below
                 update_mean = tf.compat.v1.assign(
                     bn_mov_mean, decay * bn_mov_mean + (1 - decay) * batch_mean)
                 update_var  = tf.compat.v1.assign(
@@ -774,17 +772,13 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean)
                 tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_var)
 
-                # tf.cond switches between minibatch stats (train) and running averages (eval)
-                # — this is the correct graph-mode way to branch on a symbolic bool tensor
                 mean_to_use = tf.cond(is_training, lambda: batch_mean, lambda: bn_mov_mean)
                 var_to_use  = tf.cond(is_training, lambda: batch_var,  lambda: bn_mov_var)
 
                 batch_norm = tf.nn.batch_normalization(
                     pre_activations, mean_to_use, var_to_use, bn_beta, bn_gamma, epsilon)
 
-                # logits = batch_norm output (no ReLU — raw values needed for cross-entropy loss)
                 logits = batch_norm
-
                 tf.compat.v1.summary.histogram('pre_activations', logits)
             # softmax_cross_entropy_with_logits expects raw (unbounded) values;
             # applying ReLU first zeros out negative values -> corrupts gradient signal during training
