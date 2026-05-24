@@ -731,8 +731,6 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # Boolean placeholder: True during training, False (default) during eval/inference.
-    # Using placeholder_with_default so the frozen graph works without feeding it.
     is_training = tf.compat.v1.placeholder_with_default(False, shape=(), name='is_training')
 
     layer_name = 'final_training_ops'
@@ -748,9 +746,9 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         with tf.compat.v1.name_scope('Wx_plus_b'):
             pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
-            # BN learnable parameters and running statistics.
+            # BN learnable parameters and running statistics
             # get_variable is used so these are registered in the graph's variable
-            # collections and picked up correctly by convert_variables_to_constants.
+            # collections and picked up correctly by convert_variables_to_constants
             bn_gamma    = tf.compat.v1.get_variable(
                 'bn_gamma',    initializer=tf.ones([class_count]),  trainable=True)
             bn_beta     = tf.compat.v1.get_variable(
@@ -774,21 +772,12 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
             tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean)
             tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_var)
 
-            # Arithmetic switching instead of tf.cond.
-            # tf.cond places variable reads inside subgraph branch functions,
-            # which makes them invisible to convert_variables_to_constants and
-            # causes the ReadVariableOp error in the frozen .pb.
-            # With arithmetic switching every variable read stays in the main
-            # graph path and gets frozen correctly.
             # t=1.0 (training)  → uses live batch statistics
             # t=0.0 (inference) → uses learned running averages
             t = tf.cast(is_training, tf.float32)
             mean_to_use = t * batch_mean + (1.0 - t) * bn_mov_mean
             var_to_use  = t * batch_var  + (1.0 - t) * bn_mov_var
 
-            # Fix 1: logits = raw BN output, NO ReLU.
-            # softmax_cross_entropy_with_logits requires unbounded values;
-            # ReLU before it zeroes negatives and corrupts gradients.
             logits = tf.nn.batch_normalization(
                 pre_activations, mean_to_use, var_to_use, bn_beta, bn_gamma, epsilon)
 
