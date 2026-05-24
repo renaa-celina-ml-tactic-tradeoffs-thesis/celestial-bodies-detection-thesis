@@ -731,7 +731,8 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # boolean placeholder to switch batch norm between training mode (minibatch stats) and eval mode (running averages).
+    # Boolean placeholder: True during training, False (default) during eval/inference.
+    # Using placeholder_with_default so the frozen graph works without feeding it.
     is_training = tf.compat.v1.placeholder_with_default(False, shape=(), name='is_training')
 
     layer_name = 'final_training_ops'
@@ -745,58 +746,51 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            pre_activations = tf.matmul(
-                bottleneck_input,
-                layer_weights
-            ) + layer_biases
+            pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
 
-            with tf.compat.v1.name_scope('Wx_plus_b'):
-                pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            # BN learnable parameters and running statistics.
+            # get_variable is used so these are registered in the graph's variable
+            # collections and picked up correctly by convert_variables_to_constants.
+            bn_gamma    = tf.compat.v1.get_variable(
+                'bn_gamma',    initializer=tf.ones([class_count]),  trainable=True)
+            bn_beta     = tf.compat.v1.get_variable(
+                'bn_beta',     initializer=tf.zeros([class_count]), trainable=True)
+            bn_mov_mean = tf.compat.v1.get_variable(
+                'bn_mov_mean', initializer=tf.zeros([class_count]), trainable=False)
+            bn_mov_var  = tf.compat.v1.get_variable(
+                'bn_mov_var',  initializer=tf.ones([class_count]),  trainable=False)
 
-                # Use get_variable so convert_variables_to_constants can freeze these into
-                # the .pb correctly — tf.Variable creates ResourceVariables in TF2 which
-                # convert_variables_to_constants cannot inline.
-                bn_gamma    = tf.compat.v1.get_variable(
-                    'bn_gamma',    initializer=tf.ones([class_count]),  trainable=True)
-                bn_beta     = tf.compat.v1.get_variable(
-                    'bn_beta',     initializer=tf.zeros([class_count]), trainable=True)
-                bn_mov_mean = tf.compat.v1.get_variable(
-                    'bn_mov_mean', initializer=tf.zeros([class_count]), trainable=False)
-                bn_mov_var  = tf.compat.v1.get_variable(
-                    'bn_mov_var',  initializer=tf.ones([class_count]),  trainable=False)
+            epsilon = 1e-5
+            decay   = 0.99
 
-                epsilon = 1e-5
-                decay   = 0.99
+            batch_mean, batch_var = tf.nn.moments(pre_activations, axes=[0])
 
-                batch_mean, batch_var = tf.nn.moments(pre_activations, axes=[0])
+            # Queue running-average updates to run alongside every training step
+            # via the existing control_dependencies(update_ops) block below.
+            update_mean = tf.compat.v1.assign(
+                bn_mov_mean, decay * bn_mov_mean + (1.0 - decay) * batch_mean)
+            update_var = tf.compat.v1.assign(
+                bn_mov_var,  decay * bn_mov_var  + (1.0 - decay) * batch_var)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_var)
 
-                # Enqueue running-average updates for the optimizer's control_dependencies block
-                update_mean = tf.compat.v1.assign(
-                    bn_mov_mean, decay * bn_mov_mean + (1.0 - decay) * batch_mean)
-                update_var  = tf.compat.v1.assign(
-                    bn_mov_var,  decay * bn_mov_var  + (1.0 - decay) * batch_var)
-                tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean)
-                tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_var)
+            # Arithmetic switching instead of tf.cond.
+            # tf.cond places variable reads inside subgraph branch functions,
+            # which makes them invisible to convert_variables_to_constants and
+            # causes the ReadVariableOp error in the frozen .pb.
+            # With arithmetic switching every variable read stays in the main
+            # graph path and gets frozen correctly.
+            # t=1.0 (training)  → uses live batch statistics
+            # t=0.0 (inference) → uses learned running averages
+            t = tf.cast(is_training, tf.float32)
+            mean_to_use = t * batch_mean + (1.0 - t) * bn_mov_mean
+            var_to_use  = t * batch_var  + (1.0 - t) * bn_mov_var
 
-                # Arithmetic switch instead of tf.cond — tf.cond creates subgraph branches
-                # that hide variables from convert_variables_to_constants, breaking the
-                # frozen .pb. Arithmetic switching keeps every variable read in the main
-                # graph path so they all get frozen correctly.
-                # When is_training=True  (t=1.0): uses live batch stats
-                # When is_training=False (t=0.0): uses learned running averages
-                t = tf.cast(is_training, tf.float32)
-                mean_to_use = t * batch_mean + (1.0 - t) * bn_mov_mean
-                var_to_use  = t * batch_var  + (1.0 - t) * bn_mov_var
-
-                # Fix 1: pass batch_norm output directly as logits — no ReLU
-                # softmax_cross_entropy_with_logits needs raw unbounded values
-                logits = tf.nn.batch_normalization(
-                    pre_activations, mean_to_use, var_to_use, bn_beta, bn_gamma, epsilon)
-
-                tf.compat.v1.summary.histogram('pre_activations', logits)
-            # softmax_cross_entropy_with_logits expects raw (unbounded) values;
-            # applying ReLU first zeros out negative values -> corrupts gradient signal during training
-            logits = batch_norm
+            # Fix 1: logits = raw BN output, NO ReLU.
+            # softmax_cross_entropy_with_logits requires unbounded values;
+            # ReLU before it zeroes negatives and corrupts gradients.
+            logits = tf.nn.batch_normalization(
+                pre_activations, mean_to_use, var_to_use, bn_beta, bn_gamma, epsilon)
 
             tf.compat.v1.summary.histogram('pre_activations', logits)
 
@@ -816,7 +810,6 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         with tf.control_dependencies(update_ops):
             train_step = optimizer.minimize(cross_entropy_mean)
 
-    # Return is_training so callers can set it correctly in feed_dict
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
             final_tensor, is_training)
 
