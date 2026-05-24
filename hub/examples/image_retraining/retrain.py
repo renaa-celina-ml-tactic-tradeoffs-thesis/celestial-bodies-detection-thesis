@@ -727,13 +727,12 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
         bottleneck_input = tf.compat.v1.placeholder_with_default(
             bottleneck_tensor, shape=[None, BOTTLENECK_TENSOR_SIZE],
             name='BottleneckInputPlaceholder')
-
         ground_truth_input = tf.compat.v1.placeholder(tf.float32,
                                                       [None, class_count],
                                                       name='GroundTruthInput')
 
-    # Organizing the following ops as `final_training_ops` so they're easier
-    # to see in TensorBoard
+    is_training = tf.compat.v1.placeholder_with_default(False, shape=(), name='is_training')
+
     layer_name = 'final_training_ops'
     with tf.compat.v1.name_scope(layer_name):
         with tf.compat.v1.name_scope('weights'):
@@ -745,7 +744,43 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
                 tf.zeros([class_count]), name='final_biases')
             variable_summaries(layer_biases)
         with tf.compat.v1.name_scope('Wx_plus_b'):
-            logits = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+            pre_activations = tf.matmul(bottleneck_input, layer_weights) + layer_biases
+
+            # BN learnable parameters and running statistics
+            # get_variable is used so these are registered in the graph's variable
+            # collections and picked up correctly by convert_variables_to_constants
+            bn_gamma    = tf.compat.v1.get_variable(
+                'bn_gamma',    initializer=tf.ones([class_count]),  trainable=True)
+            bn_beta     = tf.compat.v1.get_variable(
+                'bn_beta',     initializer=tf.zeros([class_count]), trainable=True)
+            bn_mov_mean = tf.compat.v1.get_variable(
+                'bn_mov_mean', initializer=tf.zeros([class_count]), trainable=False)
+            bn_mov_var  = tf.compat.v1.get_variable(
+                'bn_mov_var',  initializer=tf.ones([class_count]),  trainable=False)
+
+            epsilon = 1e-5
+            decay   = 0.99
+
+            batch_mean, batch_var = tf.nn.moments(pre_activations, axes=[0])
+
+            # Queue running-average updates to run alongside every training step
+            # via the existing control_dependencies(update_ops) block below.
+            update_mean = tf.compat.v1.assign(
+                bn_mov_mean, decay * bn_mov_mean + (1.0 - decay) * batch_mean)
+            update_var = tf.compat.v1.assign(
+                bn_mov_var,  decay * bn_mov_var  + (1.0 - decay) * batch_var)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_mean)
+            tf.compat.v1.add_to_collection(tf.compat.v1.GraphKeys.UPDATE_OPS, update_var)
+
+            # t=1.0 (training)  → uses live batch statistics
+            # t=0.0 (inference) → uses learned running averages
+            t = tf.cast(is_training, tf.float32)
+            mean_to_use = t * batch_mean + (1.0 - t) * bn_mov_mean
+            var_to_use  = t * batch_var  + (1.0 - t) * bn_mov_var
+
+            logits = tf.nn.batch_normalization(
+                pre_activations, mean_to_use, var_to_use, bn_beta, bn_gamma, epsilon)
+
             tf.compat.v1.summary.histogram('pre_activations', logits)
 
     final_tensor = tf.nn.softmax(logits, name=final_tensor_name)
@@ -759,11 +794,13 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor):
     tf.compat.v1.summary.scalar('cross_entropy', cross_entropy_mean)
 
     with tf.compat.v1.name_scope('train'):
-        train_step = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate).minimize(
-            cross_entropy_mean)
+        optimizer = tf.compat.v1.train.GradientDescentOptimizer(FLAGS.learning_rate)
+        update_ops = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            train_step = optimizer.minimize(cross_entropy_mean)
 
     return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
-            final_tensor)
+            final_tensor, is_training)
 
 
 def add_evaluation_step(result_tensor, ground_truth_tensor):
@@ -831,7 +868,7 @@ def main(_):
 
     # Add the new layer that we'll be training.
     (train_step, cross_entropy, bottleneck_input, ground_truth_input,
-     final_tensor) = add_final_training_ops(len(image_lists.keys()),
+     final_tensor, is_training) = add_final_training_ops(len(image_lists.keys()),
                                             FLAGS.final_tensor_name,
                                             bottleneck_tensor)
 
@@ -871,7 +908,8 @@ def main(_):
         # step. Capture training summaries for TensorBoard with the `merged` op.
         train_summary, _ = sess.run([merged, train_step],
                                     feed_dict={bottleneck_input: train_bottlenecks,
-                                               ground_truth_input: train_ground_truth})
+                                               ground_truth_input: train_ground_truth,
+                                               is_training: True}) # pass is_training=True so BN uses minibatch stats
         train_writer.add_summary(train_summary, i)
 
         # Every so often, print out how well the graph is training.
@@ -880,7 +918,8 @@ def main(_):
             train_accuracy, cross_entropy_value = sess.run(
                 [evaluation_step, cross_entropy],
                 feed_dict={bottleneck_input: train_bottlenecks,
-                           ground_truth_input: train_ground_truth})
+                           ground_truth_input: train_ground_truth,
+                           is_training: False}) # omit is_training, BN uses its learned running averages instead
             print('%s: Step %d: Train accuracy = %.1f%%' % (datetime.now(), i,
                                                             train_accuracy * 100))
             print('%s: Step %d: Cross entropy = %f' % (datetime.now(), i,
