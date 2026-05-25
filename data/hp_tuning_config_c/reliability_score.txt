@@ -1,0 +1,4 @@
+Reliability Metric: Output Consistency Score
+Consistency Score: 0.9866
+Mean Instability (F1 std dev across runs): 0.0134
+Number of runs: 50
