@@ -1,0 +1,20 @@
+retrain.py
+    F 51:0 create_image_lists - C (13)
+    F 478:0 f1_test_set_evaluation - B (10)
+    F 539:0 validate_directory - B (9)
+    F 371:0 main - B (7)
+    F 214:0 get_or_create_bottleneck - B (6)
+    F 246:0 cache_bottlenecks - A (5)
+    F 263:0 get_random_cached_bottlenecks - A (5)
+    F 121:0 get_image_path - A (4)
+    F 169:0 maybe_download_and_extract - A (3)
+    F 197:0 create_bottleneck_file - A (3)
+    F 191:0 ensure_dir_exists - A (2)
+    F 139:0 get_bottleneck_path - A (1)
+    F 145:0 create_inception_graph - A (1)
+    F 160:0 run_bottleneck_on_image - A (1)
+    F 305:0 variable_summaries - A (1)
+    F 319:0 add_final_training_ops - A (1)
+    F 357:0 add_evaluation_step - A (1)
+
+Weighted Average CC: 6.3642

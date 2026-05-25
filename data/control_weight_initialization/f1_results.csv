@@ -1,0 +1,12 @@
+timestamp,run_id,run_number,f1_weighted,precision_weighted,recall_weighted
+2026-05-12T14:02:37,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:05:03,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:07:29,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:09:55,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:12:20,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:14:45,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:17:11,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:19:36,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:22:00,control weight initialization,1,0.8794,0.9129,0.8595
+2026-05-12T14:24:25,control weight initialization,1,0.8794,0.9129,0.8595
+"2026-05-12T14:24:25","control weight initialization_AVG","0","0.8794","0.9129","0.8595"

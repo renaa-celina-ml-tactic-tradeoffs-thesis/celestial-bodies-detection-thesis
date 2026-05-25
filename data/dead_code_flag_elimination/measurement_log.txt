@@ -1,0 +1,15 @@
+
+CC Weighted Average: 6.3642
+Run 1: 24.9812 seconds
+Run 2: 24.0935 seconds
+Run 3: 23.7411 seconds
+Run 4: 24.3658 seconds
+Run 5: 24.8431 seconds
+Run 6: 24.5133 seconds
+Run 7: 24.8846 seconds
+Run 8: 24.6291 seconds
+Run 9: 25.0576 seconds
+Run 10: 24.9499 seconds
+Average training time: 24.6059 seconds
+Consistency Score: 0.9905
+F1 Std Dev (instability): 0.0095

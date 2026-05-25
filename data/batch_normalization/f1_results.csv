@@ -1,0 +1,12 @@
+timestamp,run_id,run_number,f1_weighted,precision_weighted,recall_weighted
+2026-05-24T16:11:42,batch normalization,1,0.8669,0.9147,0.843
+2026-05-24T16:14:15,batch normalization,1,0.924,0.9532,0.9091
+2026-05-24T16:16:48,batch normalization,1,0.8927,0.9303,0.8678
+2026-05-24T16:19:20,batch normalization,1,0.8966,0.9433,0.8678
+2026-05-24T16:21:53,batch normalization,1,0.8869,0.9165,0.8678
+2026-05-24T16:24:26,batch normalization,1,0.9121,0.9607,0.8843
+2026-05-24T16:26:58,batch normalization,1,0.9033,0.9481,0.876
+2026-05-24T16:29:31,batch normalization,1,0.9096,0.9532,0.8843
+2026-05-24T16:32:03,batch normalization,1,0.8962,0.9359,0.876
+2026-05-24T16:34:36,batch normalization,1,0.9011,0.9341,0.8843
+"2026-05-24T16:34:37","batch normalization_AVG","0","0.8989","0.939","0.876"
